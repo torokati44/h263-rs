@@ -38,31 +38,31 @@ fn sample_chroma_for_luma(
             (luma_y as i32 - 1) / 2
         };
 
-        sample_00 = chroma
-            .get(clamped_index(width, height, chroma_x, chroma_y))
-            .copied()
-            .unwrap_or(0) as u16;
-        sample_10 = chroma
-            .get(clamped_index(width, height, chroma_x + 1, chroma_y))
-            .copied()
-            .unwrap_or(0) as u16;
-        sample_01 = chroma
-            .get(clamped_index(width, height, chroma_x, chroma_y + 1))
-            .copied()
-            .unwrap_or(0) as u16;
-        sample_11 = chroma
-            .get(clamped_index(width, height, chroma_x + 1, chroma_y + 1))
-            .copied()
-            .unwrap_or(0) as u16;
+        debug_assert!(clamped_index(width, height, chroma_x + 1, chroma_y + 1) < chroma.len());
+        unsafe {
+            sample_00 =
+                *chroma.get_unchecked(clamped_index(width, height, chroma_x, chroma_y)) as u16;
+            sample_10 =
+                *chroma.get_unchecked(clamped_index(width, height, chroma_x + 1, chroma_y)) as u16;
+            sample_01 =
+                *chroma.get_unchecked(clamped_index(width, height, chroma_x, chroma_y + 1)) as u16;
+            sample_11 =
+                *chroma.get_unchecked(clamped_index(width, height, chroma_x + 1, chroma_y + 1))
+                    as u16;
+        }
     } else {
         let chroma_x = (luma_x as i32 - 1) / 2;
         let chroma_y = (luma_y as i32 - 1) / 2;
 
         let base = unclamped_index(width, chroma_x, chroma_y);
-        sample_00 = chroma.get(base).copied().unwrap_or(0) as u16;
-        sample_10 = chroma.get(base + 1).copied().unwrap_or(0) as u16;
-        sample_01 = chroma.get(base + chroma_width).copied().unwrap_or(0) as u16;
-        sample_11 = chroma.get(base + chroma_width + 1).copied().unwrap_or(0) as u16;
+
+        debug_assert!(base + chroma_width + 1 < chroma.len());
+        unsafe {
+            sample_00 = *chroma.get_unchecked(base) as u16;
+            sample_10 = *chroma.get_unchecked(base + 1) as u16;
+            sample_01 = *chroma.get_unchecked(base + chroma_width) as u16;
+            sample_11 = *chroma.get_unchecked(base + chroma_width + 1) as u16;
+        }
     }
 
     let interp_left = luma_x % 2 != 0;
@@ -147,15 +147,8 @@ lazy_static! {
 }
 
 #[inline]
-fn convert_and_write_pixel(
-    yuv: (u8, u8, u8),
-    rgba: &mut Vec<u8>,
-    width: usize,
-    x_pos: usize,
-    y_pos: usize,
-    luts: &LUTs,
-) {
-    let (y_sample, b_sample, r_sample) = yuv;
+fn yuv_to_rgb(yuv: (u8, u8,u8), luts: &LUTs) -> (u8, u8, u8) {
+    let (y, cb, cr) = yuv;
 
     // We rely on the optimizers in rustc/LLVM to eliminate the bounds checks when indexing
     // into the fixed 256-long arrays in `luts` with indices coming in as `u8` parameters.
@@ -171,10 +164,49 @@ fn convert_and_write_pixel(
     let g = (y + luts.cr_to_g[r_sample as usize] + luts.cb_to_g[b_sample as usize] + 8) >> 4;
     let b = (y + luts.cb_to_b[b_sample as usize] + 8) >> 4;
 
-    let base = (x_pos + y_pos * width) * 4;
-    rgba[base] = r.clamp(0, 255) as u8;
-    rgba[base + 1] = g.clamp(0, 255) as u8;
-    rgba[base + 2] = b.clamp(0, 255) as u8;
+    // the unsafes down here rely on the fact that base will not overflow rgba
+    debug_assert!(base + 4 <= rgba.len()); // the + 4 is for the alpha channel, even though we're not writing that here
+    *unsafe { rgba.get_unchecked_mut(base) } = r.clamp(0, 255) as u8;
+    *unsafe { rgba.get_unchecked_mut(base + 1) } = g.clamp(0, 255) as u8;
+    *unsafe { rgba.get_unchecked_mut(base + 2) } = b.clamp(0, 255) as u8;
+}
+*/
+
+#[derive(Copy, Clone, Default)]
+struct SampleQuadrant {
+    y: u8,
+    cb: u8,
+    cb_quarter: u8,
+    cr: u8,
+    cr_quarter: u8,
+}
+
+impl SampleQuadrant {
+    #[inline]
+    fn new(y: u8, cb: u8, cr: u8) -> Self {
+        Self {
+            y,
+            cb,
+            cb_quarter: (cb + 2) / 4,
+            cr,
+            cr_quarter: (cr + 2) / 4,
+        }
+    }
+
+    #[inline]
+    fn interp_chroma_quarter_toward(self, other: Self) -> Self {
+        let new_y = self.y;
+        let new_cb = self.cb - self.cb_quarter + other.cb_quarter;
+        let new_cr = self.cr - self.cr_quarter + other.cr_quarter;
+        Self::new(new_y, new_cb, new_cr)
+    }
+}
+
+impl Into<(u8, u8, u8)> for SampleQuadrant {
+    #[inline]
+    fn into(self) -> (u8, u8, u8) {
+        (self.y, self.cb, self.cr)
+    }
 }
 
 /// Convert YUV 4:2:0 data into RGB 1:1:1 data.
@@ -198,26 +230,94 @@ pub fn yuv420_to_rgba(
     // making sure that the "is it initialized already?" check is only done once per frame by getting a direct reference
     let luts: &LUTs = &*LUTS;
 
-    // do the bulk of the pixels faster, with no clamping, leaving out the edges
-    for y_pos in 1..y_height - 1 {
-        for x_pos in 1..y_width - 1 {
-            let y_sample = y.get(x_pos + y_pos * y_width).copied().unwrap_or(0);
-            let b_sample =
-                sample_chroma_for_luma(chroma_b, br_width, br_height, x_pos, y_pos, false);
-            let r_sample =
-                sample_chroma_for_luma(chroma_r, br_width, br_height, x_pos, y_pos, false);
+    let mut lefttop : SampleQuadrant;
+    let mut leftbot : SampleQuadrant;
 
-            convert_and_write_pixel(
-                (y_sample, b_sample, r_sample),
-                &mut rgba,
-                y_width,
-                x_pos,
-                y_pos,
-                luts,
-            );
+    let mut y_base_top : usize = y_width + 1;
+    let mut y_base_bot : usize = y_base_top + y_width;
+    let mut rgba_base_top : usize = y_base_top * 4;
+    let mut rgba_base_bot : usize = rgba_base_top + y_width * 4;
+
+
+    for chroma_row in 0..br_height-1 {
+
+        lefttop = SampleQuadrant::new(y[y_base_top],
+            chroma_b[chroma_row * br_width],
+            chroma_r[chroma_row * br_width]);
+
+        leftbot = SampleQuadrant::new(y[y_base_bot],
+            chroma_b[chroma_row * br_width + br_width],
+            chroma_r[chroma_row * br_width + br_width]);
+
+
+        for chroma_col in 0..br_width-1 {
+
+            let righttop = SampleQuadrant::new(y[y_base_top + 1],
+                chroma_b[chroma_row * br_width + chroma_col + 1],
+                chroma_r[chroma_row * br_width + chroma_col + 1]);
+
+            let rightbot = SampleQuadrant::new(y[y_base_bot + 1],
+                chroma_b[chroma_row * br_width + chroma_col + 1 + br_width],
+                chroma_r[chroma_row * br_width + chroma_col + 1 + br_width]);
+
+
+            let top_l = lefttop.interp_chroma_quarter_toward(righttop);
+            let top_r = righttop.interp_chroma_quarter_toward(lefttop);
+
+            let bot_l = leftbot.interp_chroma_quarter_toward(rightbot);
+            let bot_r = rightbot.interp_chroma_quarter_toward(leftbot);
+
+
+            let tl = top_l.interp_chroma_quarter_toward(bot_l);
+            let tr = top_r.interp_chroma_quarter_toward(bot_r);
+
+            let bl = bot_l.interp_chroma_quarter_toward(top_l);
+            let br = bot_r.interp_chroma_quarter_toward(top_r);
+
+
+            let tl = yuv_to_rgb(tl.into(), &luts);
+            let tr = yuv_to_rgb(tr.into(), &luts);
+
+            let bl = yuv_to_rgb(bl.into(), &luts);
+            let br = yuv_to_rgb(br.into(), &luts);
+
+
+            rgba[rgba_base_top] = tl.0;
+            rgba[rgba_base_top+1] = tl.1;
+            rgba[rgba_base_top+2] = tl.2;
+
+            rgba[rgba_base_top+4] = tr.0;
+            rgba[rgba_base_top+5] = tr.1;
+            rgba[rgba_base_top+6] = tr.2;
+
+            rgba[rgba_base_bot] = bl.0;
+            rgba[rgba_base_bot+1] = bl.1;
+            rgba[rgba_base_bot+2] = bl.2;
+
+            rgba[rgba_base_bot+4] = br.0;
+            rgba[rgba_base_bot+5] = br.1;
+            rgba[rgba_base_bot+6] = br.2;
+
+
+            y_base_top += 2;
+            y_base_bot += 2;
+            rgba_base_top += 8;
+            rgba_base_bot += 8;
+
+
+            lefttop = righttop;
+            leftbot = rightbot;
         }
+
+
+
+        y_base_top += y_width + 2;
+        y_base_bot += y_width + 2;
+        rgba_base_top += y_width*4 + 8;
+        rgba_base_bot += y_width*4 + 8;
     }
 
+/*
     // doing the sides with clamping
     for y_pos in 0..y_height {
         for x_pos in [0, y_width - 1].iter() {
@@ -227,19 +327,16 @@ pub fn yuv420_to_rgba(
             let r_sample =
                 sample_chroma_for_luma(chroma_r, br_width, br_height, *x_pos, y_pos, true);
 
-            convert_and_write_pixel(
-                (y_sample, b_sample, r_sample),
-                &mut rgba,
-                y_width,
-                *x_pos,
-                y_pos,
-                luts,
-            );
+            // just recomputing for every pixel, as there aren't any long continuous runs here
+            base = (x_pos + y_pos * y_width) * 4;
+
+            convert_and_write_pixel((y_sample, b_sample, r_sample), &mut rgba, base, luts);
         }
     }
 
     // doing the top and bottom edges with clamping
     for y_pos in [0, y_height - 1].iter() {
+        base = y_pos * y_width * 4; // resetting to the leftmost pixel of the rows
         for x_pos in 0..y_width {
             let y_sample = y.get(x_pos + y_pos * y_width).copied().unwrap_or(0);
             let b_sample =
@@ -247,16 +344,10 @@ pub fn yuv420_to_rgba(
             let r_sample =
                 sample_chroma_for_luma(chroma_r, br_width, br_height, x_pos, *y_pos, true);
 
-            convert_and_write_pixel(
-                (y_sample, b_sample, r_sample),
-                &mut rgba,
-                y_width,
-                x_pos,
-                *y_pos,
-                luts,
-            );
+            convert_and_write_pixel((y_sample, b_sample, r_sample), &mut rgba, base, luts);
+            base += 4; // advancing by one RGBA pixel
         }
     }
-
+*/
     rgba
 }
