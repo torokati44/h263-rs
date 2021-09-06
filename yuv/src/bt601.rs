@@ -168,42 +168,17 @@ fn yuv_to_rgb(yuv: (u8, u8,u8), luts: &LUTs) -> (u8, u8, u8) {
 }
 
 
-#[derive(Copy, Clone, Default)]
-struct SampleQuadrant {
-    y: u8,
-    cb: u8,
-    cr: u8,
+#[inline]
+fn interp_chroma_quarter_toward(a: &(u8, u8, u8), b: &(u8, u8, u8)) -> (u8, u8, u8) {
+    let cb = a.1 as u16;
+    let cr = a.2 as u16;
+
+    let new_cb = (cb + cb + cb + b.1 as u16 + 2) / 4;
+    let new_cr = (cr + cr + cr + b.2 as u16 + 2) / 4;
+
+    (a.0, new_cb as u8, new_cr as u8)
 }
 
-impl SampleQuadrant {
-
-    #[inline]
-    fn new(y: u8, cb: u8, cr: u8) -> Self {
-        Self {
-            y,
-            cb,
-            cr,
-        }
-    }
-
-    #[inline]
-    fn interp_chroma_quarter_toward(self, other: Self) -> Self {
-        let cb = self.cb as u16;
-        let cr = self.cr as u16;
-
-        let new_cb = (cb + cb + cb + other.cb as u16 + 2) / 4;
-        let new_cr = (cr + cr + cr + other.cr as u16 + 2) / 4;
-
-        Self::new(self.y, new_cb as u8, new_cr as u8)
-    }
-}
-
-impl Into<(u8, u8, u8)> for SampleQuadrant {
-    #[inline]
-    fn into(self) -> (u8, u8, u8) {
-        (self.y, self.cb, self.cr)
-    }
-}
 
 /// Convert YUV 4:2:0 data into RGB 1:1:1 data.
 ///
@@ -222,53 +197,68 @@ pub fn yuv420_to_rgba(
 
     // prefilling with 255, so the tight loop won't need to write to the alpha channel
     let mut rgba = vec![255; y.len() * 4];
+    let rgba_stride = y_width * 4;
 
     // making sure that the "is it initialized already?" check is only done once per frame by getting a direct reference
     let luts: &LUTs = &*LUTS;
 
-    let mut lefttop : SampleQuadrant;
-    let mut leftbot : SampleQuadrant;
 
-    let mut y_base_top : usize = y_width + 1;
-    let mut y_base_bot : usize = y_base_top + y_width;
-    let mut rgba_base_top : usize = y_base_top * 4;
-    let mut rgba_base_bot : usize = rgba_base_top + y_width * 4;
+    fn get_two_rows(of: &[u8], from: usize, width: usize) -> (&[u8], &[u8]) {
+        let (_before, rows): (&[u8], &[u8]) = of.split_at(from);
+        let (top_row, rest): (&[u8], &[u8]) = rows.split_at(width);
+        let (bottom_row, _rest): (&[u8], &[u8]) = rest.split_at(width);
+
+        (top_row, bottom_row)
+    }
+
+
+    fn get_two_rows_mut(of: &mut [u8], from: usize, width: usize) -> (&mut [u8], &mut [u8]) {
+        let (_before, rows): (&mut [u8], &mut [u8]) = of.split_at_mut(from);
+        let (top_row, rest): (&mut [u8], &mut [u8]) = rows.split_at_mut(width);
+        let (bottom_row, _rest): (&mut [u8], &mut [u8]) = rest.split_at_mut(width);
+
+        (top_row, bottom_row)
+    }
+
+
 
 
     for chroma_row in 0..br_height-1 {
+        let luma_row = chroma_row * 2;
 
-        lefttop = SampleQuadrant::new(y[y_base_top],
-            chroma_b[chroma_row * br_width],
-            chroma_r[chroma_row * br_width]);
+        let (y_upper, y_lower) = get_two_rows(&y, luma_row*y_width, y_width);
+        let (cb_upper, cb_lower) = get_two_rows(&chroma_b, chroma_row*br_width, br_width);
+        let (cr_upper, cr_lower) = get_two_rows(&chroma_r, chroma_row*br_width, br_width);
+        let (rgba_upper, rgba_lower) = get_two_rows_mut(&mut rgba, luma_row*rgba_stride, rgba_stride);
 
-        leftbot = SampleQuadrant::new(y[y_base_bot],
-            chroma_b[chroma_row * br_width + br_width],
-            chroma_r[chroma_row * br_width + br_width]);
-
-
-        for chroma_col in 0..br_width-1 {
-
-            let righttop = SampleQuadrant::new(y[y_base_top + 1],
-                chroma_b[chroma_row * br_width + chroma_col + 1],
-                chroma_r[chroma_row * br_width + chroma_col + 1]);
-
-            let rightbot = SampleQuadrant::new(y[y_base_bot + 1],
-                chroma_b[chroma_row * br_width + chroma_col + 1 + br_width],
-                chroma_r[chroma_row * br_width + chroma_col + 1 + br_width]);
+        let y_iter = y_upper.chunks(2).zip(y_lower.chunks(2));
+        let cb_iter = cb_upper.windows(2).zip(cb_lower.windows(2));
+        let cr_iter = cr_upper.windows(2).zip(cr_lower.windows(2));
+        let rgba_iter = rgba_upper.chunks_mut(8).zip(rgba_lower.chunks_mut(8));
 
 
-            let top_l = lefttop.interp_chroma_quarter_toward(righttop);
-            let top_r = righttop.interp_chroma_quarter_toward(lefttop);
 
-            let bot_l = leftbot.interp_chroma_quarter_toward(rightbot);
-            let bot_r = rightbot.interp_chroma_quarter_toward(leftbot);
+        for ((((cb_u, cb_l), (cr_u, cr_l)), (y_u, y_l)), (rgba_u, rgba_l)) in cb_iter.zip(cr_iter).zip(y_iter).zip(rgba_iter) {
+
+            // TODO move to one level up, and assign right* to these after each quad-iter
+            let lefttop = (y_u[0], cb_u[0], cr_u[0]);
+            let leftbot = (y_l[0], cb_l[0], cr_l[0]);
+
+            let righttop = (y_u[1], cb_u[1], cr_u[1]);
+            let rightbot = (y_l[1], cb_l[1], cr_l[1]);
+
+            let top_l = interp_chroma_quarter_toward(&lefttop, &righttop);
+            let top_r = interp_chroma_quarter_toward(&righttop,&lefttop);
+
+            let bot_l = interp_chroma_quarter_toward(&leftbot, &rightbot);
+            let bot_r = interp_chroma_quarter_toward(&rightbot, &leftbot);
 
 
-            let tl = top_l.interp_chroma_quarter_toward(bot_l);
-            let tr = top_r.interp_chroma_quarter_toward(bot_r);
+            let tl = interp_chroma_quarter_toward(&top_l, &bot_l);
+            let tr = interp_chroma_quarter_toward(&top_r, &bot_r);
 
-            let bl = bot_l.interp_chroma_quarter_toward(top_l);
-            let br = bot_r.interp_chroma_quarter_toward(top_r);
+            let bl = interp_chroma_quarter_toward(&bot_l, &top_l);
+            let br = interp_chroma_quarter_toward(&bot_r, &top_r);
 
 
             let tl = yuv_to_rgb(tl.into(), &luts);
@@ -278,39 +268,26 @@ pub fn yuv420_to_rgba(
             let br = yuv_to_rgb(br.into(), &luts);
 
 
-            rgba[rgba_base_top] = tl.0;
-            rgba[rgba_base_top+1] = tl.1;
-            rgba[rgba_base_top+2] = tl.2;
+            rgba_u[0] = tl.0;
+            rgba_u[1] = tl.1;
+            rgba_u[2] = tl.2;
 
-            rgba[rgba_base_top+4] = tr.0;
-            rgba[rgba_base_top+5] = tr.1;
-            rgba[rgba_base_top+6] = tr.2;
+            rgba_u[4] = tr.0;
+            rgba_u[5] = tr.1;
+            rgba_u[6] = tr.2;
 
-            rgba[rgba_base_bot] = bl.0;
-            rgba[rgba_base_bot+1] = bl.1;
-            rgba[rgba_base_bot+2] = bl.2;
+            rgba_l[0] = bl.0;
+            rgba_l[1] = bl.1;
+            rgba_l[2] = bl.2;
 
-            rgba[rgba_base_bot+4] = br.0;
-            rgba[rgba_base_bot+5] = br.1;
-            rgba[rgba_base_bot+6] = br.2;
+            rgba_l[4] = br.0;
+            rgba_l[5] = br.1;
+            rgba_l[6] = br.2;
 
-
-            y_base_top += 2;
-            y_base_bot += 2;
-            rgba_base_top += 8;
-            rgba_base_bot += 8;
-
-
-            lefttop = righttop;
-            leftbot = rightbot;
         }
 
 
 
-        y_base_top += y_width + 2;
-        y_base_bot += y_width + 2;
-        rgba_base_top += y_width*4 + 8;
-        rgba_base_bot += y_width*4 + 8;
     }
 
 /*
