@@ -156,21 +156,17 @@ fn yuv_to_rgb(yuv: (u8, u8,u8), luts: &LUTs) -> (u8, u8, u8) {
     // I verified that this is actually happening, see here: https://rust.godbolt.org/z/vWzesYzbq
     // And benchmarking showed no time difference from an `unsafe` + `get_unchecked()` solution.
 
-    let y = luts.y_to_gray[y_sample as usize];
+    let y = luts.y_to_gray[y as usize];
 
     // The `(... + 8) >> 4` parts convert back from 12.4 fixed-point to `u8` with correct rounding.
     // (At least for positive numbers - any negative numbers that might occur will be clamped to 0 anyway.)
-    let r = (y + luts.cr_to_r[r_sample as usize] + 8) >> 4;
-    let g = (y + luts.cr_to_g[r_sample as usize] + luts.cb_to_g[b_sample as usize] + 8) >> 4;
-    let b = (y + luts.cb_to_b[b_sample as usize] + 8) >> 4;
+    let r = (y + luts.cr_to_r[cr as usize] + 8) >> 4;
+    let g = (y + luts.cr_to_g[cr as usize] + luts.cb_to_g[cb as usize] + 8) >> 4;
+    let b = (y + luts.cb_to_b[cb as usize] + 8) >> 4;
 
-    // the unsafes down here rely on the fact that base will not overflow rgba
-    debug_assert!(base + 4 <= rgba.len()); // the + 4 is for the alpha channel, even though we're not writing that here
-    *unsafe { rgba.get_unchecked_mut(base) } = r.clamp(0, 255) as u8;
-    *unsafe { rgba.get_unchecked_mut(base + 1) } = g.clamp(0, 255) as u8;
-    *unsafe { rgba.get_unchecked_mut(base + 2) } = b.clamp(0, 255) as u8;
+    (r.clamp(0, 255) as u8, g.clamp(0, 255) as u8, b.clamp(0, 255) as u8)
 }
-*/
+
 
 #[derive(Copy, Clone, Default)]
 struct SampleQuadrant {
