@@ -172,29 +172,48 @@ fn yuv_to_rgb(yuv: (u8, u8,u8), luts: &LUTs) -> (u8, u8, u8) {
 struct SampleQuadrant {
     y: u8,
     cb: u8,
-    cb_quarter: u8,
+    //cb_quarter: u8,
     cr: u8,
-    cr_quarter: u8,
+    //cr_quarter: u8,
 }
 
 impl SampleQuadrant {
+/*
+    #[inline]
+    fn tricky_quarter(x: u8) -> u8 {
+        //(x / 4) + ((x >> 1) & 0b1)
+        //x.saturating_add(2) / 4
+        ((x as u16 + 2) / 4) as u8
+    }*/
+
     #[inline]
     fn new(y: u8, cb: u8, cr: u8) -> Self {
         Self {
             y,
             cb,
-            cb_quarter: (cb + 2) / 4,
+            //cb_quarter: Self::tricky_quarter(cb),
             cr,
-            cr_quarter: (cr + 2) / 4,
+            //cr_quarter: Self::tricky_quarter(cr),
         }
     }
 
     #[inline]
     fn interp_chroma_quarter_toward(self, other: Self) -> Self {
-        let new_y = self.y;
-        let new_cb = self.cb - self.cb_quarter + other.cb_quarter;
-        let new_cr = self.cr - self.cr_quarter + other.cr_quarter;
-        Self::new(new_y, new_cb, new_cr)
+        //let new_cb = self.cb - self.cb_quarter + other.cb_quarter;
+        //let new_cr = self.cr - self.cr_quarter + other.cr_quarter;
+        let new_cb = (self.cb as u16 + self.cb as u16 + self.cb as u16 + other.cb as u16 + 2) / 4;
+        let new_cr = (self.cr as u16 + self.cr as u16 + self.cr as u16 + other.cr as u16 + 2) / 4;
+
+        Self::new(self.y, new_cb as u8, new_cr as u8)
+    }
+
+    #[inline]
+    fn final_interp_chroma_quarter_toward(self, other: Self) -> (u8, u8, u8) {
+        //let new_cb = self.cb - self.cb_quarter + other.cb_quarter;
+        //let new_cr = self.cr - self.cr_quarter + other.cr_quarter;
+        let new_cb = (self.cb as u16 + self.cb as u16 + self.cb as u16 + other.cb as u16 + 2) / 4;
+        let new_cr = (self.cr as u16 + self.cr as u16 + self.cr as u16 + other.cr as u16 + 2) / 4;
+        (self.y, new_cb as u8, new_cr as u8)
     }
 }
 
@@ -264,18 +283,18 @@ pub fn yuv420_to_rgba(
             let bot_r = rightbot.interp_chroma_quarter_toward(leftbot);
 
 
-            let tl = top_l.interp_chroma_quarter_toward(bot_l);
-            let tr = top_r.interp_chroma_quarter_toward(bot_r);
+            let tl = top_l.final_interp_chroma_quarter_toward(bot_l);
+            let tr = top_r.final_interp_chroma_quarter_toward(bot_r);
 
-            let bl = bot_l.interp_chroma_quarter_toward(top_l);
-            let br = bot_r.interp_chroma_quarter_toward(top_r);
+            let bl = bot_l.final_interp_chroma_quarter_toward(top_l);
+            let br = bot_r.final_interp_chroma_quarter_toward(top_r);
 
 
-            let tl = yuv_to_rgb(tl.into(), &luts);
-            let tr = yuv_to_rgb(tr.into(), &luts);
+            let tl = yuv_to_rgb(tl, &luts);
+            let tr = yuv_to_rgb(tr, &luts);
 
-            let bl = yuv_to_rgb(bl.into(), &luts);
-            let br = yuv_to_rgb(br.into(), &luts);
+            let bl = yuv_to_rgb(bl, &luts);
+            let br = yuv_to_rgb(br, &luts);
 
 
             rgba[rgba_base_top] = tl.0;
