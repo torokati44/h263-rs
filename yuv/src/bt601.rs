@@ -221,15 +221,14 @@ pub fn yuv420_to_rgba(
     }
 
 
-
-
     for chroma_row in 0..br_height-1 {
         let luma_row = chroma_row * 2;
 
-        let (y_upper, y_lower) = get_two_rows(&y, luma_row*y_width, y_width);
+        let (y_upper, y_lower) = get_two_rows(&y, (luma_row+1)*y_width+1, y_width);
         let (cb_upper, cb_lower) = get_two_rows(&chroma_b, chroma_row*br_width, br_width);
         let (cr_upper, cr_lower) = get_two_rows(&chroma_r, chroma_row*br_width, br_width);
-        let (rgba_upper, rgba_lower) = get_two_rows_mut(&mut rgba, luma_row*rgba_stride, rgba_stride);
+        let (rgba_upper, rgba_lower) = get_two_rows_mut(&mut rgba, (luma_row+1)*rgba_stride+4, rgba_stride);
+
 
         let y_iter = y_upper.chunks(2).zip(y_lower.chunks(2));
         let cb_iter = cb_upper.windows(2).zip(cb_lower.windows(2));
