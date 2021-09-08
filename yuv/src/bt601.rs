@@ -203,20 +203,16 @@ pub fn yuv420_to_rgba(
     let luts: &LUTs = &*LUTS;
 
 
-    fn get_two_rows(of: &[u8], from: usize, width: usize) -> (&[u8], &[u8]) {
-        let (_before, rows): (&[u8], &[u8]) = of.split_at(from);
-        let (top_row, rest): (&[u8], &[u8]) = rows.split_at(width);
-        let (bottom_row, _rest): (&[u8], &[u8]) = rest.split_at(width);
-
+    fn get_two_rows(of: &[u8], from: usize, width: usize, skip: usize) -> (&[u8], &[u8]) {
+        let (top_row, rest): (&[u8], &[u8]) = (&of[from..]).split_at(width);
+        let bottom_row: &[u8] = &rest[skip..width];
         (top_row, bottom_row)
     }
 
 
-    fn get_two_rows_mut(of: &mut [u8], from: usize, width: usize) -> (&mut [u8], &mut [u8]) {
-        let (_before, rows): (&mut [u8], &mut [u8]) = of.split_at_mut(from);
-        let (top_row, rest): (&mut [u8], &mut [u8]) = rows.split_at_mut(width);
-        let (bottom_row, _rest): (&mut [u8], &mut [u8]) = rest.split_at_mut(width);
-
+    fn get_two_rows_mut(of: &mut [u8], from: usize, width: usize, skip: usize) -> (&mut [u8], &mut [u8]) {
+        let (top_row, rest): (&mut [u8], &mut [u8]) = (&mut of[from..]).split_at_mut(width);
+        let bottom_row: &mut [u8] = &mut rest[skip..width];
         (top_row, bottom_row)
     }
 
@@ -224,10 +220,10 @@ pub fn yuv420_to_rgba(
     for chroma_row in 0..br_height-1 {
         let luma_row = chroma_row * 2;
 
-        let (y_upper, y_lower) = get_two_rows(&y, (luma_row+1)*y_width+1, y_width);
-        let (cb_upper, cb_lower) = get_two_rows(&chroma_b, chroma_row*br_width, br_width);
-        let (cr_upper, cr_lower) = get_two_rows(&chroma_r, chroma_row*br_width, br_width);
-        let (rgba_upper, rgba_lower) = get_two_rows_mut(&mut rgba, (luma_row+1)*rgba_stride+4, rgba_stride);
+        let (y_upper, y_lower) = get_two_rows(&y, (luma_row+1)*y_width+1, y_width-2, 2);
+        let (cb_upper, cb_lower) = get_two_rows(&chroma_b, chroma_row*br_width, br_width-2, 2);
+        let (cr_upper, cr_lower) = get_two_rows(&chroma_r, chroma_row*br_width, br_width-2, 2);
+        let (rgba_upper, rgba_lower) = get_two_rows_mut(&mut rgba, (luma_row+1)*rgba_stride+4, rgba_stride-8, 8);
 
 
         let y_iter = y_upper.chunks(2).zip(y_lower.chunks(2));
