@@ -148,6 +148,9 @@ fn get_two_rows(of: &[u8], start: usize, width: usize, stride: usize) -> (&[u8],
     debug_assert!(stride >= width);
 
     let (top_row, rest): (&[u8], &[u8]) = (&of[start..]).split_at(width);
+    // `width` number of elements are already split off into `top_row`, so only the
+    // difference has to be skipped here.
+    // And for the end index, `(stride - width) + width` works out to just `stride`.
     let bottom_row: &[u8] = &rest[(stride - width)..stride];
     (top_row, bottom_row)
 }
@@ -161,6 +164,9 @@ fn get_two_rows_mut(of: &mut [u8], start: usize, width: usize, stride: usize) ->
     debug_assert!(stride >= width);
 
     let (top_row, rest): (&mut [u8], &mut [u8]) = (&mut of[start..]).split_at_mut(width);
+    // `width` number of elements are already split off into `top_row`, so only the
+    // difference has to be skipped here.
+    // And for the end index, `(stride - width) + width` works out to just `stride`.
     let bottom_row: &mut [u8] = &mut rest[(stride - width)..stride];
     (top_row, bottom_row)
 }
