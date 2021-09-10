@@ -206,8 +206,7 @@ pub fn yuv420_to_rgba(
     debug_assert_eq!((y_width + 1) / 2, br_width);
     debug_assert_eq!((y_height + 1) / 2, br_height);
 
-    // prefilling with 255, so the tight loop won't need to write to the alpha channel
-    let mut rgba = vec![255; y.len() * 4];
+    let mut rgba = vec![0; y.len() * 4];
     let rgba_stride = y_width * 4; // 4 bytes per pixel, interleaved
 
     // making sure that the "is it initialized already?" check is only done once per frame by getting a direct reference
@@ -277,23 +276,9 @@ pub fn yuv420_to_rgba(
             let bottomleft_rgb = yuv_to_rgb(bottomleft_final.into(), &luts);
             let bottomright_rgb = yuv_to_rgb(bottomright_final.into(), &luts);
 
-            // Finally they are written into the output array one by one,
-            // not writing to the A channel, since it's already 255
-            rgba_u[0] = topleft_rgb.0;
-            rgba_u[1] = topleft_rgb.1;
-            rgba_u[2] = topleft_rgb.2;
-
-            rgba_u[4] = topright_rgb.0;
-            rgba_u[5] = topright_rgb.1;
-            rgba_u[6] = topright_rgb.2;
-
-            rgba_l[0] = bottomleft_rgb.0;
-            rgba_l[1] = bottomleft_rgb.1;
-            rgba_l[2] = bottomleft_rgb.2;
-
-            rgba_l[4] = bottomright_rgb.0;
-            rgba_l[5] = bottomright_rgb.1;
-            rgba_l[6] = bottomright_rgb.2;
+            // Finally they are written into the output array
+            rgba_u.copy_from_slice(&[topleft_rgb.0, topleft_rgb.1, topleft_rgb.2, 255, topright_rgb.0, topright_rgb.1, topright_rgb.2, 255]);
+            rgba_l.copy_from_slice(&[bottomleft_rgb.0, bottomleft_rgb.1, bottomleft_rgb.2, 255, bottomright_rgb.0, bottomright_rgb.1, bottomright_rgb.2, 255]);
 
             // Note: The unmodified "right" chroma components (both top and bottom, both cb and cr) could
             // potentially be reused in the next iteration as "left" components, thus removing the need to
