@@ -2,88 +2,6 @@
 
 use lazy_static::lazy_static;
 
-fn clamped_index(width: i32, height: i32, x: i32, y: i32) -> usize {
-    (x.clamp(0, width - 1) + (y.clamp(0, height - 1) * width)) as usize
-}
-
-fn unclamped_index(width: i32, x: i32, y: i32) -> usize {
-    (x + y * width) as usize
-}
-
-fn sample_chroma_for_luma(
-    chroma: &[u8],
-    chroma_width: usize,
-    chroma_height: usize,
-    luma_x: usize,
-    luma_y: usize,
-    clamp: bool,
-) -> u8 {
-    let width = chroma_width as i32;
-    let height = chroma_height as i32;
-
-    let sample_00;
-    let sample_01;
-    let sample_10;
-    let sample_11;
-
-    if clamp {
-        let chroma_x = if luma_x == 0 {
-            -1
-        } else {
-            (luma_x as i32 - 1) / 2
-        };
-        let chroma_y = if luma_y == 0 {
-            -1
-        } else {
-            (luma_y as i32 - 1) / 2
-        };
-
-        debug_assert!(clamped_index(width, height, chroma_x + 1, chroma_y + 1) < chroma.len());
-        unsafe {
-            sample_00 =
-                *chroma.get_unchecked(clamped_index(width, height, chroma_x, chroma_y)) as u16;
-            sample_10 =
-                *chroma.get_unchecked(clamped_index(width, height, chroma_x + 1, chroma_y)) as u16;
-            sample_01 =
-                *chroma.get_unchecked(clamped_index(width, height, chroma_x, chroma_y + 1)) as u16;
-            sample_11 =
-                *chroma.get_unchecked(clamped_index(width, height, chroma_x + 1, chroma_y + 1))
-                    as u16;
-        }
-    } else {
-        let chroma_x = (luma_x as i32 - 1) / 2;
-        let chroma_y = (luma_y as i32 - 1) / 2;
-
-        let base = unclamped_index(width, chroma_x, chroma_y);
-
-        debug_assert!(base + chroma_width + 1 < chroma.len());
-        unsafe {
-            sample_00 = *chroma.get_unchecked(base) as u16;
-            sample_10 = *chroma.get_unchecked(base + 1) as u16;
-            sample_01 = *chroma.get_unchecked(base + chroma_width) as u16;
-            sample_11 = *chroma.get_unchecked(base + chroma_width + 1) as u16;
-        }
-    }
-
-    let interp_left = luma_x % 2 != 0;
-    let interp_top = luma_y % 2 != 0;
-
-    let mut sample: u16 = 0;
-    sample += sample_00 * if interp_left { 3 } else { 1 };
-    sample += sample_10 * if interp_left { 1 } else { 3 };
-
-    sample += sample_01 * if interp_left { 3 } else { 1 };
-    sample += sample_11 * if interp_left { 1 } else { 3 };
-
-    sample += sample_00 * if interp_top { 3 } else { 1 };
-    sample += sample_01 * if interp_top { 1 } else { 3 };
-
-    sample += sample_10 * if interp_top { 3 } else { 1 };
-    sample += sample_11 * if interp_top { 1 } else { 3 };
-
-    ((sample + 8) / 16) as u8
-}
-
 /// Precomputes and stores the linear functions for converting YUV (YCb'Cr' to be precise)
 /// colors to RGB (sRGB-like, with gamma) colors, in signed 12.4 fixed-point integer format.
 ///
@@ -156,20 +74,26 @@ fn yuv_to_rgb(yuv: (u8, u8,u8), luts: &LUTs) -> (u8, u8, u8) {
     // I verified that this is actually happening, see here: https://rust.godbolt.org/z/vWzesYzbq
     // And benchmarking showed no time difference from an `unsafe` + `get_unchecked()` solution.
 
-    let y = luts.y_to_gray[y as usize];
+    let gray = luts.y_to_gray[y as usize];
 
     // The `(... + 8) >> 4` parts convert back from 12.4 fixed-point to `u8` with correct rounding.
     // (At least for positive numbers - any negative numbers that might occur will be clamped to 0 anyway.)
-    let r = (y + luts.cr_to_r[cr as usize] + 8) >> 4;
-    let g = (y + luts.cr_to_g[cr as usize] + luts.cb_to_g[cb as usize] + 8) >> 4;
-    let b = (y + luts.cb_to_b[cb as usize] + 8) >> 4;
+    let r = (gray + luts.cr_to_r[cr as usize] + 8) >> 4;
+    let g = (gray + luts.cr_to_g[cr as usize] + luts.cb_to_g[cb as usize] + 8) >> 4;
+    let b = (gray + luts.cb_to_b[cb as usize] + 8) >> 4;
 
     (r.clamp(0, 255) as u8, g.clamp(0, 255) as u8, b.clamp(0, 255) as u8)
 }
 
 
+/// Performs a linear interpolation with fixed t=0.25 between a and b,
+/// but only their .1 and .2 components, with proper rounding.
+/// a.0 is passed through as the .0 component of the result without
+/// touching it, and b.0 is completely ignored.
+///
+/// The naming refers to its practical use on (Y, Cb', Cr') color tuples.
 #[inline]
-fn interp_chroma_quarter_toward(a: &(u8, u8, u8), b: &(u8, u8, u8)) -> (u8, u8, u8) {
+fn lerp_chroma(a: &(u8, u8, u8), b: &(u8, u8, u8)) -> (u8, u8, u8) {
     let cb = a.1 as u16;
     let cr = a.2 as u16;
 
@@ -180,11 +104,83 @@ fn interp_chroma_quarter_toward(a: &(u8, u8, u8), b: &(u8, u8, u8)) -> (u8, u8, 
 }
 
 
-/// Convert YUV 4:2:0 data into RGB 1:1:1 data.
+/// Similar to `lerp_chroma`, but the interpolated components of the result
+/// (.1 and .2) are not rounded and divided by 4, to keep more precision.
+/// So they are returned as `u16`, having 4 times the value they actually
+/// should - or you can think of them as being in 14.2 fixed-point format.
+#[inline]
+fn bilerp_chroma_step1(a: &(u8, u8, u8), b: &(u8, u8, u8)) -> (u8, u16, u16) {
+    let cb = a.1 as u16;
+    let cr = a.2 as u16;
+
+    let new_cb = cb + cb + cb + b.1 as u16;
+    let new_cr = cr + cr + cr + b.2 as u16;
+
+    (a.0, new_cb, new_cr)
+}
+
+
+/// Similar to `lerp_chroma`, but takes the parameters in the format as returned
+/// by `bilerp_chroma_step1`. At the end, it performs the rounding and division on
+/// the interpolated components, so converts them back to the regular `u8` format.
+#[inline]
+fn bilerp_chroma_step2(a: &(u8, u16, u16), b: &(u8, u16, u16)) -> (u8, u8, u8) {
+    // The division by 4 has to be done twice at this point, hence the / 16,
+    // and the + 8 is for correct rounding.
+    let new_cb = (a.1 + a.1 + a.1 + b.1 + 8) / 16;
+    let new_cr = (a.2 + a.2 + a.2 + b.2 + 8) / 16;
+
+    (a.0, new_cb as u8, new_cr as u8)
+}
+
+
+/// Returns two subslices of `of` as a tuple. Both are `width` long.
+/// The first one starts at the index `start`, and the second one at `start + stride`.
+///
+/// Preconditions:
+///  - `start + width <= of.len()`.
+///  - `start + stride + width <= of.len()`.
+///  - `stride >= width`
+#[inline]
+fn get_two_rows(of: &[u8], start: usize, width: usize, stride: usize) -> (&[u8], &[u8]) {
+    debug_assert!(start + width <= of.len());
+    debug_assert!(start + stride + width <= of.len());
+    debug_assert!(stride >= width);
+
+    let (top_row, rest): (&[u8], &[u8]) = (&of[start..]).split_at(width);
+    let bottom_row: &[u8] = &rest[(stride - width)..stride];
+    (top_row, bottom_row)
+}
+
+
+/// Similar to `get_two_rows`, but the slices going in and out are all `mut`.
+#[inline]
+fn get_two_rows_mut(of: &mut [u8], start: usize, width: usize, stride: usize) -> (&mut [u8], &mut [u8]) {
+    debug_assert!(start + width <= of.len());
+    debug_assert!(start + stride + width <= of.len());
+    debug_assert!(stride >= width);
+
+    let (top_row, rest): (&mut [u8], &mut [u8]) = (&mut of[start..]).split_at_mut(width);
+    let bottom_row: &mut [u8] = &mut rest[(stride - width)..stride];
+    (top_row, bottom_row)
+}
+
+
+/// Convert planar YUV 4:2:0 data into interleaved RGBA 8888 data.
 ///
 /// This function yields an RGBA picture with the same number of pixels as were
 /// provided in the `y` picture. The `b` and `r` pictures will be resampled at
 /// this stage, and the resulting picture will have color components mixed.
+///
+/// Preconditions:
+///  - `y.len()` must be an integer multiple of `y_width`
+///  - `chroma_b.len()` and `chroma_r.len()` must both be integer multiples of `br_width`
+///  - `chroma_b` and `chroma_r` must be the same size
+///  - If `y_width` is even, `br_width` must be `y_width / 2`, otherwise, `(y_width + 1) / 2`
+///  - With `y_height` computed as `y.len() / y_width`, and `br_height` as `chroma_b.len() / br_width`:
+///    If `y_height` is even, `br_height` must be `y_height / 2`, otherwise, `(y_height + 1) / 2`
+///    (So, either there is an "outer" column/row of luma samples on the right/bottom (similar to how
+///    there always is on the left/top) or they are cut off - independently of each other)
 pub fn yuv420_to_rgba(
     y: &[u8],
     chroma_b: &[u8],
@@ -192,97 +188,111 @@ pub fn yuv420_to_rgba(
     y_width: usize,
     br_width: usize,
 ) -> Vec<u8> {
+    debug_assert_eq!(y.len() % y_width, 0);
+    debug_assert_eq!(chroma_b.len() % br_width, 0);
+    debug_assert_eq!(chroma_r.len() % br_width, 0);
+    debug_assert_eq!(chroma_b.len(), chroma_r.len());
+
     let y_height = y.len() / y_width;
     let br_height = chroma_b.len() / br_width;
 
+    // the + 1 will be dropped after division for even sizes
+    debug_assert_eq!((y_width + 1) / 2, br_width);
+    debug_assert_eq!((y_height + 1) / 2, br_height);
+
     // prefilling with 255, so the tight loop won't need to write to the alpha channel
     let mut rgba = vec![255; y.len() * 4];
-    let rgba_stride = y_width * 4;
+    let rgba_stride = y_width * 4; // 4 bytes per pixel, interleaved
 
     // making sure that the "is it initialized already?" check is only done once per frame by getting a direct reference
     let luts: &LUTs = &*LUTS;
 
+    // About the algorithm below:
+    //
+    // Consider Figure 2/H.263 in the ITU-T H.263 Recommendation.
+    //
+    // Every iteration below works with a 2x2 "bunch" of neighbouring chrominance samples,
+    // and the 2x2 luminance samples "enclosed by" these chrominance samples; writing to
+    // the 2x2 output pixels in the same location in the picture as the luminance samples.
+    //
+    // This means that the topmost row and the leftmost column of output pixels is not covered
+    // by this loop. On pictures of even width, the rightmost column isn't covered either;
+    // and similarly, on pictures of even height, the bottommost row is left out as well.
+    //
+    // Initially, the chrominance samples are "further out" of these 2x2 rectangles than they
+    // should be, so they are bilinearly interpolated to the location of the luminance samples.
 
-    fn get_two_rows(of: &[u8], from: usize, width: usize, skip: usize) -> (&[u8], &[u8]) {
-        let (top_row, rest): (&[u8], &[u8]) = (&of[from..]).split_at(width);
-        let bottom_row: &[u8] = &rest[skip..width];
-        (top_row, bottom_row)
-    }
-
-
-    fn get_two_rows_mut(of: &mut [u8], from: usize, width: usize, skip: usize) -> (&mut [u8], &mut [u8]) {
-        let (top_row, rest): (&mut [u8], &mut [u8]) = (&mut of[from..]).split_at_mut(width);
-        let bottom_row: &mut [u8] = &mut rest[skip..width];
-        (top_row, bottom_row)
-    }
-
-
+    // Iteration is done in a row-major order to fit the slice layouts.
     for chroma_row in 0..br_height-1 {
-        let luma_row = chroma_row * 2;
+        // Selecting two consecutive rows from all 3 input and the output slices to work with.
+        // The top row of Y and RGBA has to be skipped, as well as the first sample/pixel of
+        // each row. The width of the Y and RGBA rows is derived from br_width to make the
+        // parity of y_width irrelevant.
+        let luma_row = chroma_row * 2 + 1;
 
-        let (y_upper, y_lower) = get_two_rows(&y, (luma_row+1)*y_width+1, y_width-2, 2);
-        let (cb_upper, cb_lower) = get_two_rows(&chroma_b, chroma_row*br_width, br_width-2, 2);
-        let (cr_upper, cr_lower) = get_two_rows(&chroma_r, chroma_row*br_width, br_width-2, 2);
-        let (rgba_upper, rgba_lower) = get_two_rows_mut(&mut rgba, (luma_row+1)*rgba_stride+4, rgba_stride-8, 8);
+        let (y_upper, y_lower) = get_two_rows(&y, luma_row*y_width+1, 2*(br_width-1), y_width);
+        let (cb_upper, cb_lower) = get_two_rows(&chroma_b, chroma_row*br_width, br_width, br_width);
+        let (cr_upper, cr_lower) = get_two_rows(&chroma_r, chroma_row*br_width, br_width, br_width);
+        let (rgba_upper, rgba_lower) = get_two_rows_mut(&mut rgba, luma_row*rgba_stride+4, 2*(br_width-1)*4, rgba_stride);
 
-
+        // The Cb and Cr data has to be iterated on with overlaps, while every sample or pixel
+        // of Y and RGBA data only has to be touched in one iteration.
         let y_iter = y_upper.chunks(2).zip(y_lower.chunks(2));
         let cb_iter = cb_upper.windows(2).zip(cb_lower.windows(2));
         let cr_iter = cr_upper.windows(2).zip(cr_lower.windows(2));
+        // Similar to how Y is iterated on, but with 4 channels per pixel
         let rgba_iter = rgba_upper.chunks_mut(8).zip(rgba_lower.chunks_mut(8));
 
+        for ((((y_u, y_l), (cb_u, cb_l)), (cr_u, cr_l)), (rgba_u, rgba_l)) in y_iter.zip(cb_iter).zip(cr_iter).zip(rgba_iter) {
+            let topleft = (y_u[0], cb_u[0], cr_u[0]);
+            let bottomleft = (y_l[0], cb_l[0], cr_l[0]);
 
+            let topright = (y_u[1], cb_u[1], cr_u[1]);
+            let bottomright = (y_l[1], cb_l[1], cr_l[1]);
 
-        for ((((cb_u, cb_l), (cr_u, cr_l)), (y_u, y_l)), (rgba_u, rgba_l)) in cb_iter.zip(cr_iter).zip(y_iter).zip(rgba_iter) {
+            // Bringing in the chroma components to where they should be horizontally
+            let topleft_intermediate = bilerp_chroma_step1(&topleft, &topright);
+            let topright_intermediate = bilerp_chroma_step1(&topright,&topleft);
 
-            // TODO move to one level up, and assign right* to these after each quad-iter
-            let lefttop = (y_u[0], cb_u[0], cr_u[0]);
-            let leftbot = (y_l[0], cb_l[0], cr_l[0]);
+            let bottomleft_intermediate = bilerp_chroma_step1(&bottomleft, &bottomright);
+            let bottomright_intermediate = bilerp_chroma_step1(&bottomright, &bottomleft);
 
-            let righttop = (y_u[1], cb_u[1], cr_u[1]);
-            let rightbot = (y_l[1], cb_l[1], cr_l[1]);
+            // Then putting them in the right place vertically as well
+            let topleft_final = bilerp_chroma_step2(&topleft_intermediate, &bottomleft_intermediate);
+            let bottomleft_final = bilerp_chroma_step2(&bottomleft_intermediate, &topleft_intermediate);
 
-            let top_l = interp_chroma_quarter_toward(&lefttop, &righttop);
-            let top_r = interp_chroma_quarter_toward(&righttop,&lefttop);
+            let topright_final = bilerp_chroma_step2(&topright_intermediate, &bottomright_intermediate);
+            let bottomright_final = bilerp_chroma_step2(&bottomright_intermediate, &topright_intermediate);
 
-            let bot_l = interp_chroma_quarter_toward(&leftbot, &rightbot);
-            let bot_r = interp_chroma_quarter_toward(&rightbot, &leftbot);
+            // Now the colorspace conversion can be done on the colocated components
+            let topleft_rgb = yuv_to_rgb(topleft_final.into(), &luts);
+            let topright_rgb = yuv_to_rgb(topright_final.into(), &luts);
 
+            let bottomleft_rgb = yuv_to_rgb(bottomleft_final.into(), &luts);
+            let bottomright_rgb = yuv_to_rgb(bottomright_final.into(), &luts);
 
-            let tl = interp_chroma_quarter_toward(&top_l, &bot_l);
-            let tr = interp_chroma_quarter_toward(&top_r, &bot_r);
+            // Finally they are written into the output array one by one,
+            // not writing to the A channel, since it's already 255
+            rgba_u[0] = topleft_rgb.0;
+            rgba_u[1] = topleft_rgb.1;
+            rgba_u[2] = topleft_rgb.2;
 
-            let bl = interp_chroma_quarter_toward(&bot_l, &top_l);
-            let br = interp_chroma_quarter_toward(&bot_r, &top_r);
+            rgba_u[4] = topright_rgb.0;
+            rgba_u[5] = topright_rgb.1;
+            rgba_u[6] = topright_rgb.2;
 
+            rgba_l[0] = bottomleft_rgb.0;
+            rgba_l[1] = bottomleft_rgb.1;
+            rgba_l[2] = bottomleft_rgb.2;
 
-            let tl = yuv_to_rgb(tl.into(), &luts);
-            let tr = yuv_to_rgb(tr.into(), &luts);
+            rgba_l[4] = bottomright_rgb.0;
+            rgba_l[5] = bottomright_rgb.1;
+            rgba_l[6] = bottomright_rgb.2;
 
-            let bl = yuv_to_rgb(bl.into(), &luts);
-            let br = yuv_to_rgb(br.into(), &luts);
-
-
-            rgba_u[0] = tl.0;
-            rgba_u[1] = tl.1;
-            rgba_u[2] = tl.2;
-
-            rgba_u[4] = tr.0;
-            rgba_u[5] = tr.1;
-            rgba_u[6] = tr.2;
-
-            rgba_l[0] = bl.0;
-            rgba_l[1] = bl.1;
-            rgba_l[2] = bl.2;
-
-            rgba_l[4] = br.0;
-            rgba_l[5] = br.1;
-            rgba_l[6] = br.2;
-
+            // Note: The unmodified "right" chroma components (both top and bottom, both cb and cr) could
+            // potentially be reused in the next iteration as "left" components, thus removing the need to
+            // iterate on 2-long windows of these slices, but I think everything is clearer this way.
         }
-
-
-
     }
 
 /*
