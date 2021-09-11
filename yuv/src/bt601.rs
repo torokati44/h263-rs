@@ -199,6 +199,10 @@ pub fn yuv420_to_rgba(
     debug_assert_eq!(chroma_r.len() % br_width, 0);
     debug_assert_eq!(chroma_b.len(), chroma_r.len());
 
+    if y.is_empty() {
+        return vec![];
+    }
+
     let y_height = y.len() / y_width;
     let br_height = chroma_b.len() / br_width;
 
