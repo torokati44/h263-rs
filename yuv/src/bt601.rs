@@ -391,7 +391,6 @@ pub fn yuv420_to_rgba(
         process_edge_row(y, chroma_b, chroma_r, y_width, br_width, &mut rgba, y_height - 1, luts);
     }
 
-    /*
 
     // The left column always needs to be processed separately (this will finally deal with the corner pixels)
     process_edge_col(y, chroma_b, chroma_r, y_width, br_width, &mut rgba, 0, luts);
@@ -400,7 +399,5 @@ pub fn yuv420_to_rgba(
         process_edge_col(y, chroma_b, chroma_r, y_width, br_width, &mut rgba, y_width - 1, luts);
     }
 
-
-*/
     rgba
 }
