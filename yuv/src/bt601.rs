@@ -138,8 +138,8 @@ fn bilerp_chroma_step2(a: &(u8, u16, u16), b: &(u8, u16, u16)) -> (u8, u8, u8) {
 /// The first one starts at the index `start`, and the second one at `start + stride`.
 ///
 /// Preconditions:
-///  - `start + width <= of.len()`.
-///  - `start + stride + width <= of.len()`.
+///  - `start + width <= of.len()`
+///  - `start + stride + width <= of.len()`
 ///  - `stride >= width`
 #[inline]
 fn get_two_rows(of: &[u8], start: usize, width: usize, stride: usize) -> (&[u8], &[u8]) {
@@ -148,8 +148,8 @@ fn get_two_rows(of: &[u8], start: usize, width: usize, stride: usize) -> (&[u8],
     debug_assert!(stride >= width);
 
     let (top_row, rest): (&[u8], &[u8]) = (&of[start..]).split_at(width);
-    // `width` number of elements are already split off into `top_row`, so only the
-    // difference has to be skipped here.
+    // `width` number of elements are already split off into `top_row`,
+    // so only the difference has to be skipped here.
     // And for the end index, `(stride - width) + width` works out to just `stride`.
     let bottom_row: &[u8] = &rest[(stride - width)..stride];
     (top_row, bottom_row)
@@ -164,13 +164,17 @@ fn get_two_rows_mut(of: &mut [u8], start: usize, width: usize, stride: usize) ->
     debug_assert!(stride >= width);
 
     let (top_row, rest): (&mut [u8], &mut [u8]) = (&mut of[start..]).split_at_mut(width);
-    // `width` number of elements are already split off into `top_row`, so only the
-    // difference has to be skipped here.
+    // `width` number of elements are already split off into `top_row`,
+    // so only the difference has to be skipped here.
     // And for the end index, `(stride - width) + width` works out to just `stride`.
     let bottom_row: &mut [u8] = &mut rest[(stride - width)..stride];
     (top_row, bottom_row)
 }
 
+/// The y, chroma_b, chroma_r, y_width, br_width parameters must obey the same
+/// requirements as in `yuv420_to_rgba`. `row` must be either 0 or y_height-1.
+/// Interpolation is only done horiztonally. Always exactly one row of chroma
+/// samples are used, either the first or the last.
 #[inline]
 fn process_edge_row(y: &[u8],
     chroma_b: &[u8],
@@ -211,9 +215,13 @@ fn process_edge_row(y: &[u8],
     }
 }
 
-
+/// The y, chroma_b, chroma_r, y_width, br_width parameters must obey the same
+/// requirements as in `yuv420_to_rgba`, plus:
+///  - `col` must be either 0 or y_width-1
+///  - none of y_width, br_width, y_height, or br_height can be 0
 #[inline]
-fn process_edge_col(y: &[u8],
+fn process_edge_col(
+    y: &[u8],
     chroma_b: &[u8],
     chroma_r: &[u8],
     y_width: usize,
@@ -227,11 +235,34 @@ fn process_edge_col(y: &[u8],
     let y_height = y.len() / y_width;
     let br_height = chroma_b.len() / br_width;
 
-    // I could probably do something with step_by, but couldn't be bothered
-    for y in 0..y_height {
+    // the top pixel is special, there is no need for interpolation
+    // the `col/2` will be rounded down for rightmost cols, which is what we want
+    let top_rgb = yuv_to_rgb((y[col], chroma_b[col/2], chroma_r[col/2]), &luts);
+    rgba[col*4..(col+1)*4].copy_from_slice(&[top_rgb.0, top_rgb.1, top_rgb.2, 255]);
 
+    // I could probably do something with step_by, but couldn't be bothered
+    for br_y in 0..br_height-1 {
+        let y_top_y = (br_y*2)+1;
+
+        let top_yuv = (y[y_top_y*y_width + col], chroma_b[br_y*br_width + col/2], chroma_r[br_y*br_width + col/2]);
+        let bottom_yuv = (y[(y_top_y+1)*y_width + col], chroma_b[(br_y+1)*br_width + col/2], chroma_r[(br_y+1)*br_width + col/2]);
+
+        let top_rgb = yuv_to_rgb(lerp_chroma(&top_yuv, &bottom_yuv), &luts);
+        let bottom_rgb = yuv_to_rgb(lerp_chroma(&bottom_yuv, &top_yuv), &luts);
+
+        rgba[y_top_y*4..(y_top_y+1)*4].copy_from_slice(&[top_rgb.0, top_rgb.1, top_rgb.2, 255]);
+        rgba[(y_top_y+y_width)*4..(y_top_y+y_width+1)*4].copy_from_slice(&[bottom_rgb.0, bottom_rgb.1, bottom_rgb.2, 255]);
     }
-    unimplemented!("TODO");
+
+    // bottom pixel, if needed
+    if (y_height % 2) == 0 {
+        let y_index = (y_height-1)*y_width + col;
+        let br_index = (br_height-1)*br_width + col/2;
+        // the top pixel is special, there is no need for interpolation
+        // the `col/2` will be rounded down for rightmost cols, which is what we want
+        let rgb = yuv_to_rgb((y[y_index], chroma_b[br_index], chroma_r[br_index]), &luts);
+        rgba[y_index*4..(y_index+1)*4].copy_from_slice(&[rgb.0, rgb.1, rgb.2, 255]);
+    }
 }
 
 /// Convert planar YUV 4:2:0 data into interleaved RGBA 8888 data.
