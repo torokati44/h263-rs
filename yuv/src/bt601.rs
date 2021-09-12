@@ -180,6 +180,7 @@ fn get_two_rows_mut(
 /// Interpolation is only done horiztonally. Always exactly one row of chroma
 /// samples are used, either the first or the last.
 #[inline]
+#[allow(clippy::too_many_arguments)]
 fn process_edge_row(
     y: &[u8],
     chroma_b: &[u8],
@@ -213,8 +214,8 @@ fn process_edge_row(
         let left = (y[0], cb[0], cr[0]);
         let right = (y[1], cb[1], cr[1]);
 
-        let left_rgb = yuv_to_rgb(lerp_chroma(&left, &right), &luts);
-        let right_rgb = yuv_to_rgb(lerp_chroma(&right, &left), &luts);
+        let left_rgb = yuv_to_rgb(lerp_chroma(&left, &right), luts);
+        let right_rgb = yuv_to_rgb(lerp_chroma(&right, &left), luts);
 
         rgba.copy_from_slice(&[
             left_rgb.0,
@@ -234,6 +235,7 @@ fn process_edge_row(
 ///  - `col` must be either 0 or y_width-1
 ///  - none of y_width, br_width, y_height, or br_height can be 0
 #[inline]
+#[allow(clippy::too_many_arguments)]
 fn process_edge_col(
     y: &[u8],
     chroma_b: &[u8],
@@ -251,7 +253,7 @@ fn process_edge_col(
 
     // the top pixel is special, there is no need for interpolation
     // the `col/2` will be rounded down for rightmost cols, which is what we want
-    let top_rgb = yuv_to_rgb((y[col], chroma_b[col / 2], chroma_r[col / 2]), &luts);
+    let top_rgb = yuv_to_rgb((y[col], chroma_b[col / 2], chroma_r[col / 2]), luts);
     rgba[col * 4..(col + 1) * 4].copy_from_slice(&[top_rgb.0, top_rgb.1, top_rgb.2, 255]);
 
     // I could probably do something with step_by, but couldn't be bothered
@@ -269,8 +271,8 @@ fn process_edge_col(
             chroma_r[(br_y + 1) * br_width + col / 2],
         );
 
-        let top_rgb = yuv_to_rgb(lerp_chroma(&top_yuv, &bottom_yuv), &luts);
-        let bottom_rgb = yuv_to_rgb(lerp_chroma(&bottom_yuv, &top_yuv), &luts);
+        let top_rgb = yuv_to_rgb(lerp_chroma(&top_yuv, &bottom_yuv), luts);
+        let bottom_rgb = yuv_to_rgb(lerp_chroma(&bottom_yuv, &top_yuv), luts);
 
         rgba[y_top_y * 4..(y_top_y + 1) * 4]
             .copy_from_slice(&[top_rgb.0, top_rgb.1, top_rgb.2, 255]);
@@ -288,7 +290,7 @@ fn process_edge_col(
         let br_index = (br_height - 1) * br_width + col / 2;
         // the top pixel is special, there is no need for interpolation
         // the `col/2` will be rounded down for rightmost cols, which is what we want
-        let rgb = yuv_to_rgb((y[y_index], chroma_b[br_index], chroma_r[br_index]), &luts);
+        let rgb = yuv_to_rgb((y[y_index], chroma_b[br_index], chroma_r[br_index]), luts);
         rgba[y_index * 4..(y_index + 1) * 4].copy_from_slice(&[rgb.0, rgb.1, rgb.2, 255]);
     }
 }
@@ -362,11 +364,11 @@ pub fn yuv420_to_rgba(
         let luma_row = chroma_row * 2 + 1;
 
         let (y_upper, y_lower) =
-            get_two_rows(&y, luma_row * y_width + 1, 2 * (br_width - 1), y_width);
+            get_two_rows(y, luma_row * y_width + 1, 2 * (br_width - 1), y_width);
         let (cb_upper, cb_lower) =
-            get_two_rows(&chroma_b, chroma_row * br_width, br_width, br_width);
+            get_two_rows(chroma_b, chroma_row * br_width, br_width, br_width);
         let (cr_upper, cr_lower) =
-            get_two_rows(&chroma_r, chroma_row * br_width, br_width, br_width);
+            get_two_rows(chroma_r, chroma_row * br_width, br_width, br_width);
         let (rgba_upper, rgba_lower) = get_two_rows_mut(
             &mut rgba,
             luma_row * rgba_stride + 4,
@@ -410,11 +412,11 @@ pub fn yuv420_to_rgba(
                 bilerp_chroma_step2(&bottomright_intermediate, &topright_intermediate);
 
             // Now the colorspace conversion can be done on the colocated components
-            let topleft_rgb = yuv_to_rgb(topleft_final, &luts);
-            let topright_rgb = yuv_to_rgb(topright_final, &luts);
+            let topleft_rgb = yuv_to_rgb(topleft_final, luts);
+            let topright_rgb = yuv_to_rgb(topright_final, luts);
 
-            let bottomleft_rgb = yuv_to_rgb(bottomleft_final, &luts);
-            let bottomright_rgb = yuv_to_rgb(bottomright_final, &luts);
+            let bottomleft_rgb = yuv_to_rgb(bottomleft_final, luts);
+            let bottomright_rgb = yuv_to_rgb(bottomright_final, luts);
 
             // Finally they are written into the output array, with fixed A values
             rgba_u.copy_from_slice(&[
