@@ -65,7 +65,7 @@ lazy_static! {
 }
 
 #[inline]
-fn yuv_to_rgb(yuv: (u8, u8,u8), luts: &LUTs) -> (u8, u8, u8) {
+fn yuv_to_rgb(yuv: (u8, u8, u8), luts: &LUTs) -> (u8, u8, u8) {
     let (y, cb, cr) = yuv;
 
     // We rely on the optimizers in rustc/LLVM to eliminate the bounds checks when indexing
@@ -82,9 +82,12 @@ fn yuv_to_rgb(yuv: (u8, u8,u8), luts: &LUTs) -> (u8, u8, u8) {
     let g = (gray + luts.cr_to_g[cr as usize] + luts.cb_to_g[cb as usize] + 8) >> 4;
     let b = (gray + luts.cb_to_b[cb as usize] + 8) >> 4;
 
-    (r.clamp(0, 255) as u8, g.clamp(0, 255) as u8, b.clamp(0, 255) as u8)
+    (
+        r.clamp(0, 255) as u8,
+        g.clamp(0, 255) as u8,
+        b.clamp(0, 255) as u8,
+    )
 }
-
 
 /// Performs a linear interpolation with fixed t=0.25 between a and b,
 /// but only their .1 and .2 components, with proper rounding.
@@ -103,7 +106,6 @@ fn lerp_chroma(a: &(u8, u8, u8), b: &(u8, u8, u8)) -> (u8, u8, u8) {
     (a.0, new_cb as u8, new_cr as u8)
 }
 
-
 /// Similar to `lerp_chroma`, but the interpolated components of the result
 /// (.1 and .2) are not rounded and divided by 4, to keep more precision.
 /// So they are returned as `u16`, having 4 times the value they actually
@@ -119,7 +121,6 @@ fn bilerp_chroma_step1(a: &(u8, u8, u8), b: &(u8, u8, u8)) -> (u8, u16, u16) {
     (a.0, new_cb, new_cr)
 }
 
-
 /// Similar to `lerp_chroma`, but takes the parameters in the format as returned
 /// by `bilerp_chroma_step1`. At the end, it performs the rounding and division on
 /// the interpolated components, so converts them back to the regular `u8` format.
@@ -132,7 +133,6 @@ fn bilerp_chroma_step2(a: &(u8, u16, u16), b: &(u8, u16, u16)) -> (u8, u8, u8) {
 
     (a.0, new_cb as u8, new_cr as u8)
 }
-
 
 /// Returns two subslices of `of` as a tuple. Both are `width` long.
 /// The first one starts at the index `start`, and the second one at `start + stride`.
@@ -155,10 +155,14 @@ fn get_two_rows(of: &[u8], start: usize, width: usize, stride: usize) -> (&[u8],
     (top_row, bottom_row)
 }
 
-
 /// Similar to `get_two_rows`, but the slices going in and out are all `mut`.
 #[inline]
-fn get_two_rows_mut(of: &mut [u8], start: usize, width: usize, stride: usize) -> (&mut [u8], &mut [u8]) {
+fn get_two_rows_mut(
+    of: &mut [u8],
+    start: usize,
+    width: usize,
+    stride: usize,
+) -> (&mut [u8], &mut [u8]) {
     debug_assert!(start + width <= of.len());
     debug_assert!(start + stride + width <= of.len());
     debug_assert!(stride >= width);
@@ -176,24 +180,25 @@ fn get_two_rows_mut(of: &mut [u8], start: usize, width: usize, stride: usize) ->
 /// Interpolation is only done horiztonally. Always exactly one row of chroma
 /// samples are used, either the first or the last.
 #[inline]
-fn process_edge_row(y: &[u8],
+fn process_edge_row(
+    y: &[u8],
     chroma_b: &[u8],
     chroma_r: &[u8],
     y_width: usize,
     br_width: usize,
     rgba: &mut [u8],
     row: usize,
-    luts: &LUTs
+    luts: &LUTs,
 ) {
     debug_assert!(row == 0 || ((row == (y.len() / y_width) - 1) && (row % 2 == 1)));
 
-    let y_from = row*y_width;
+    let y_from = row * y_width;
     let y_to = y_from + y_width; // TODO does even-odd width matter?
 
     // For the top row, this will of course yield the first chroma row (below the first luma row);
     // and for the last row, as its index must be odd, so it will be rounded down, and the last
     // chroma row will be used (above the last luma row).
-    let br_from = (row/2)*br_width;
+    let br_from = (row / 2) * br_width;
     let br_to = br_from + br_width; // TODO does even-odd width matter?
 
     let rgba_from = row * y_width * 4;
@@ -209,9 +214,18 @@ fn process_edge_row(y: &[u8],
         let right = (y[1], cb[1], cr[1]);
 
         let left_rgb = yuv_to_rgb(lerp_chroma(&left, &right), &luts);
-        let right_rgb = yuv_to_rgb(lerp_chroma(&right,&left), &luts);
+        let right_rgb = yuv_to_rgb(lerp_chroma(&right, &left), &luts);
 
-        rgba.copy_from_slice(&[left_rgb.0, left_rgb.1, left_rgb.2, 255, right_rgb.0, right_rgb.1, right_rgb.2, 255]);
+        rgba.copy_from_slice(&[
+            left_rgb.0,
+            left_rgb.1,
+            left_rgb.2,
+            255,
+            right_rgb.0,
+            right_rgb.1,
+            right_rgb.2,
+            255,
+        ]);
     }
 }
 
@@ -228,7 +242,7 @@ fn process_edge_col(
     br_width: usize,
     rgba: &mut [u8],
     col: usize,
-    luts: &LUTs
+    luts: &LUTs,
 ) {
     debug_assert!(col == 0 || ((col == y_width - 1) && (col % 2 == 1)));
 
@@ -237,31 +251,45 @@ fn process_edge_col(
 
     // the top pixel is special, there is no need for interpolation
     // the `col/2` will be rounded down for rightmost cols, which is what we want
-    let top_rgb = yuv_to_rgb((y[col], chroma_b[col/2], chroma_r[col/2]), &luts);
-    rgba[col*4..(col+1)*4].copy_from_slice(&[top_rgb.0, top_rgb.1, top_rgb.2, 255]);
+    let top_rgb = yuv_to_rgb((y[col], chroma_b[col / 2], chroma_r[col / 2]), &luts);
+    rgba[col * 4..(col + 1) * 4].copy_from_slice(&[top_rgb.0, top_rgb.1, top_rgb.2, 255]);
 
     // I could probably do something with step_by, but couldn't be bothered
-    for br_y in 0..br_height-1 {
-        let y_top_y = (br_y*2)+1;
+    for br_y in 0..br_height - 1 {
+        let y_top_y = (br_y * 2) + 1;
 
-        let top_yuv = (y[y_top_y*y_width + col], chroma_b[br_y*br_width + col/2], chroma_r[br_y*br_width + col/2]);
-        let bottom_yuv = (y[(y_top_y+1)*y_width + col], chroma_b[(br_y+1)*br_width + col/2], chroma_r[(br_y+1)*br_width + col/2]);
+        let top_yuv = (
+            y[y_top_y * y_width + col],
+            chroma_b[br_y * br_width + col / 2],
+            chroma_r[br_y * br_width + col / 2],
+        );
+        let bottom_yuv = (
+            y[(y_top_y + 1) * y_width + col],
+            chroma_b[(br_y + 1) * br_width + col / 2],
+            chroma_r[(br_y + 1) * br_width + col / 2],
+        );
 
         let top_rgb = yuv_to_rgb(lerp_chroma(&top_yuv, &bottom_yuv), &luts);
         let bottom_rgb = yuv_to_rgb(lerp_chroma(&bottom_yuv, &top_yuv), &luts);
 
-        rgba[y_top_y*4..(y_top_y+1)*4].copy_from_slice(&[top_rgb.0, top_rgb.1, top_rgb.2, 255]);
-        rgba[(y_top_y+y_width)*4..(y_top_y+y_width+1)*4].copy_from_slice(&[bottom_rgb.0, bottom_rgb.1, bottom_rgb.2, 255]);
+        rgba[y_top_y * 4..(y_top_y + 1) * 4]
+            .copy_from_slice(&[top_rgb.0, top_rgb.1, top_rgb.2, 255]);
+        rgba[(y_top_y + y_width) * 4..(y_top_y + y_width + 1) * 4].copy_from_slice(&[
+            bottom_rgb.0,
+            bottom_rgb.1,
+            bottom_rgb.2,
+            255,
+        ]);
     }
 
     // bottom pixel, if needed
     if (y_height % 2) == 0 {
-        let y_index = (y_height-1)*y_width + col;
-        let br_index = (br_height-1)*br_width + col/2;
+        let y_index = (y_height - 1) * y_width + col;
+        let br_index = (br_height - 1) * br_width + col / 2;
         // the top pixel is special, there is no need for interpolation
         // the `col/2` will be rounded down for rightmost cols, which is what we want
         let rgb = yuv_to_rgb((y[y_index], chroma_b[br_index], chroma_r[br_index]), &luts);
-        rgba[y_index*4..(y_index+1)*4].copy_from_slice(&[rgb.0, rgb.1, rgb.2, 255]);
+        rgba[y_index * 4..(y_index + 1) * 4].copy_from_slice(&[rgb.0, rgb.1, rgb.2, 255]);
     }
 }
 
@@ -326,17 +354,25 @@ pub fn yuv420_to_rgba(
     // should be, so they are bilinearly interpolated to the location of the luminance samples.
 
     // Iteration is done in a row-major order to fit the slice layouts.
-    for chroma_row in 0..br_height-1 {
+    for chroma_row in 0..br_height - 1 {
         // Selecting two consecutive rows from all 3 input and the output slices to work with.
         // The top row of Y and RGBA has to be skipped, as well as the first sample/pixel of
         // each row. The width of the Y and RGBA rows is derived from br_width to make the
         // parity of y_width irrelevant.
         let luma_row = chroma_row * 2 + 1;
 
-        let (y_upper, y_lower) = get_two_rows(&y, luma_row*y_width+1, 2*(br_width-1), y_width);
-        let (cb_upper, cb_lower) = get_two_rows(&chroma_b, chroma_row*br_width, br_width, br_width);
-        let (cr_upper, cr_lower) = get_two_rows(&chroma_r, chroma_row*br_width, br_width, br_width);
-        let (rgba_upper, rgba_lower) = get_two_rows_mut(&mut rgba, luma_row*rgba_stride+4, 2*(br_width-1)*4, rgba_stride);
+        let (y_upper, y_lower) =
+            get_two_rows(&y, luma_row * y_width + 1, 2 * (br_width - 1), y_width);
+        let (cb_upper, cb_lower) =
+            get_two_rows(&chroma_b, chroma_row * br_width, br_width, br_width);
+        let (cr_upper, cr_lower) =
+            get_two_rows(&chroma_r, chroma_row * br_width, br_width, br_width);
+        let (rgba_upper, rgba_lower) = get_two_rows_mut(
+            &mut rgba,
+            luma_row * rgba_stride + 4,
+            2 * (br_width - 1) * 4,
+            rgba_stride,
+        );
 
         // The Cb and Cr data has to be iterated on with overlaps, while every sample or pixel
         // of Y and RGBA data only has to be touched in one iteration.
@@ -346,7 +382,9 @@ pub fn yuv420_to_rgba(
         // Similar to how Y is iterated on, but with 4 channels per pixel
         let rgba_iter = rgba_upper.chunks_mut(8).zip(rgba_lower.chunks_mut(8));
 
-        for ((((y_u, y_l), (cb_u, cb_l)), (cr_u, cr_l)), (rgba_u, rgba_l)) in y_iter.zip(cb_iter).zip(cr_iter).zip(rgba_iter) {
+        for ((((y_u, y_l), (cb_u, cb_l)), (cr_u, cr_l)), (rgba_u, rgba_l)) in
+            y_iter.zip(cb_iter).zip(cr_iter).zip(rgba_iter)
+        {
             let topleft = (y_u[0], cb_u[0], cr_u[0]);
             let bottomleft = (y_l[0], cb_l[0], cr_l[0]);
 
@@ -355,17 +393,21 @@ pub fn yuv420_to_rgba(
 
             // Bringing in the chroma components to where they should be horizontally
             let topleft_intermediate = bilerp_chroma_step1(&topleft, &topright);
-            let topright_intermediate = bilerp_chroma_step1(&topright,&topleft);
+            let topright_intermediate = bilerp_chroma_step1(&topright, &topleft);
 
             let bottomleft_intermediate = bilerp_chroma_step1(&bottomleft, &bottomright);
             let bottomright_intermediate = bilerp_chroma_step1(&bottomright, &bottomleft);
 
             // Then putting them in the right place vertically as well
-            let topleft_final = bilerp_chroma_step2(&topleft_intermediate, &bottomleft_intermediate);
-            let bottomleft_final = bilerp_chroma_step2(&bottomleft_intermediate, &topleft_intermediate);
+            let topleft_final =
+                bilerp_chroma_step2(&topleft_intermediate, &bottomleft_intermediate);
+            let bottomleft_final =
+                bilerp_chroma_step2(&bottomleft_intermediate, &topleft_intermediate);
 
-            let topright_final = bilerp_chroma_step2(&topright_intermediate, &bottomright_intermediate);
-            let bottomright_final = bilerp_chroma_step2(&bottomright_intermediate, &topright_intermediate);
+            let topright_final =
+                bilerp_chroma_step2(&topright_intermediate, &bottomright_intermediate);
+            let bottomright_final =
+                bilerp_chroma_step2(&bottomright_intermediate, &topright_intermediate);
 
             // Now the colorspace conversion can be done on the colocated components
             let topleft_rgb = yuv_to_rgb(topleft_final, &luts);
@@ -375,8 +417,26 @@ pub fn yuv420_to_rgba(
             let bottomright_rgb = yuv_to_rgb(bottomright_final, &luts);
 
             // Finally they are written into the output array, with fixed A values
-            rgba_u.copy_from_slice(&[topleft_rgb.0, topleft_rgb.1, topleft_rgb.2, 255, topright_rgb.0, topright_rgb.1, topright_rgb.2, 255]);
-            rgba_l.copy_from_slice(&[bottomleft_rgb.0, bottomleft_rgb.1, bottomleft_rgb.2, 255, bottomright_rgb.0, bottomright_rgb.1, bottomright_rgb.2, 255]);
+            rgba_u.copy_from_slice(&[
+                topleft_rgb.0,
+                topleft_rgb.1,
+                topleft_rgb.2,
+                255,
+                topright_rgb.0,
+                topright_rgb.1,
+                topright_rgb.2,
+                255,
+            ]);
+            rgba_l.copy_from_slice(&[
+                bottomleft_rgb.0,
+                bottomleft_rgb.1,
+                bottomleft_rgb.2,
+                255,
+                bottomright_rgb.0,
+                bottomright_rgb.1,
+                bottomright_rgb.2,
+                255,
+            ]);
 
             // Note: The unmodified "right" chroma components (both top and bottom, both cb and cr) could
             // potentially be reused in the next iteration as "left" components, thus removing the need to
@@ -388,15 +448,32 @@ pub fn yuv420_to_rgba(
     process_edge_row(y, chroma_b, chroma_r, y_width, br_width, &mut rgba, 0, luts);
     // On pictures of even height, the bottom row as well
     if (y_height % 2) == 0 {
-        process_edge_row(y, chroma_b, chroma_r, y_width, br_width, &mut rgba, y_height - 1, luts);
+        process_edge_row(
+            y,
+            chroma_b,
+            chroma_r,
+            y_width,
+            br_width,
+            &mut rgba,
+            y_height - 1,
+            luts,
+        );
     }
-
 
     // The left column always needs to be processed separately (this will finally deal with the corner pixels)
     process_edge_col(y, chroma_b, chroma_r, y_width, br_width, &mut rgba, 0, luts);
     // On pictures of even width, the right column as well
     if (y_width % 2) == 0 {
-        process_edge_col(y, chroma_b, chroma_r, y_width, br_width, &mut rgba, y_width - 1, luts);
+        process_edge_col(
+            y,
+            chroma_b,
+            chroma_r,
+            y_width,
+            br_width,
+            &mut rgba,
+            y_width - 1,
+            luts,
+        );
     }
 
     rgba
