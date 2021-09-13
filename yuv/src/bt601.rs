@@ -194,16 +194,16 @@ fn process_edge_row(
     debug_assert!(row == 0 || ((row == (y.len() / y_width) - 1) && (row % 2 == 1)));
 
     let y_from = row * y_width + 1;
-    let y_to = y_from + y_width-1; // TODO does even-odd width matter?
+    let y_to = y_from + y_width - 1; // TODO does even-odd width matter?
 
     // For the top row, this will of course yield the first chroma row (below the first luma row);
     // and for the last row, as its index must be odd, so it will be rounded down, and the last
     // chroma row will be used (above the last luma row).
     let br_from = (row / 2) * br_width;
-    let br_to = br_from + ((y_width+1) / 2); // TODO does even-odd width matter?
+    let br_to = br_from + ((y_width + 1) / 2); // TODO does even-odd width matter?
 
     let rgba_from = (row * y_width + 1) * 4;
-    let rgba_to = rgba_from + (y_width-1) * 4; // TODO does even-odd width matter? like: [0 .. 2*(br_width-1)*4]
+    let rgba_to = rgba_from + (y_width - 1) * 4; // TODO does even-odd width matter? like: [0 .. 2*(br_width-1)*4]
 
     let y_iter = (&y[y_from..y_to]).chunks(2);
     let cb_iter = (&chroma_b[br_from..br_to]).windows(2);
@@ -274,14 +274,10 @@ fn process_edge_col(
         let top_rgb = yuv_to_rgb(lerp_chroma(&top_yuv, &bottom_yuv), luts);
         let bottom_rgb = yuv_to_rgb(lerp_chroma(&bottom_yuv, &top_yuv), luts);
 
-        rgba[(y_top_y * y_width + col)*4..(y_top_y * y_width + col + 1)*4]
+        rgba[(y_top_y * y_width + col) * 4..(y_top_y * y_width + col + 1) * 4]
             .copy_from_slice(&[top_rgb.0, top_rgb.1, top_rgb.2, 255]);
-        rgba[((y_top_y + 1) * y_width + col)*4..((y_top_y + 1) * y_width + col + 1)*4].copy_from_slice(&[
-            bottom_rgb.0,
-            bottom_rgb.1,
-            bottom_rgb.2,
-            255,
-        ]);
+        rgba[((y_top_y + 1) * y_width + col) * 4..((y_top_y + 1) * y_width + col + 1) * 4]
+            .copy_from_slice(&[bottom_rgb.0, bottom_rgb.1, bottom_rgb.2, 255]);
     }
 
     // bottom pixel, if needed
