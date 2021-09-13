@@ -176,7 +176,11 @@ fn get_two_rows_mut(
 }
 
 /// The y, chroma_b, chroma_r, y_width, br_width parameters must obey the same
-/// requirements as in `yuv420_to_rgba`. `row` must be either 0 or y_height-1.
+/// requirements as in `yuv420_to_rgba`.
+/// Plus:
+///  - `row` must be either 0 or y_height-1.
+///  - `y_height` (computed) must be even
+///
 /// Interpolation is only done horiztonally. Always exactly one row of chroma
 /// samples are used, either the first or the last.
 #[inline]
@@ -233,6 +237,7 @@ fn process_edge_row(
 /// The y, chroma_b, chroma_r, y_width, br_width parameters must obey the same
 /// requirements as in `yuv420_to_rgba`, plus:
 ///  - `col` must be either 0 or y_width-1
+///  - y_width must be even
 ///  - none of y_width, br_width, y_height, or br_height can be 0
 #[inline]
 #[allow(clippy::too_many_arguments)]
