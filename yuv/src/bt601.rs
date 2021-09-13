@@ -136,6 +136,9 @@ fn bilerp_chroma_step2(a: &(u8, u16, u16), b: &(u8, u16, u16)) -> (u8, u8, u8) {
 
 /// Returns two subslices of `of` as a tuple. Both are `width` long.
 /// The first one starts at the index `start`, and the second one at `start + stride`.
+/// Note that even if `of` is considered a 2D array of `stride` width, the "rows"
+/// returned by this function might not match to entire rows of that array,
+/// specifically to allow for margins on the left and/or right as well.
 ///
 /// Preconditions:
 ///  - `start + width <= of.len()`
@@ -197,17 +200,19 @@ fn process_edge_row(
 ) {
     debug_assert!(row == 0 || ((row == (y.len() / y_width) - 1) && (row % 2 == 1)));
 
+    // The first column is always skipped
     let y_from = row * y_width + 1;
-    let y_to = y_from + y_width - 1; // TODO does even-odd width matter?
+    // Between all horizontal pairs of chroma samples, processing two luma samples (or pixels, if you like)
+    let y_to = y_from + (br_width - 1) * 2;
 
-    // For the top row, this will of course yield the first chroma row (below the first luma row);
-    // and for the last row, as its index must be odd, so it will be rounded down, and the last
-    // chroma row will be used (above the last luma row).
+    // For the top row, this will of course yield the first chroma row (index 0, below the first luma row);
+    // and for the last row (as its index must be odd), it will be rounded down after division, so the last
+    // chroma row will be used (above the last luma row) without overflow.
     let br_from = (row / 2) * br_width;
-    let br_to = br_from + ((y_width + 1) / 2); // TODO does even-odd width matter?
+    let br_to = br_from + br_width;
 
-    let rgba_from = (row * y_width + 1) * 4;
-    let rgba_to = rgba_from + (y_width - 1) * 4; // TODO does even-odd width matter? like: [0 .. 2*(br_width-1)*4]
+    let rgba_from = y_from * 4;
+    let rgba_to = y_to * 4;
 
     let y_iter = (&y[y_from..y_to]).chunks(2);
     let cb_iter = (&chroma_b[br_from..br_to]).windows(2);
@@ -234,8 +239,12 @@ fn process_edge_row(
     }
 }
 
+/// Converts either the leftmost or the rightmost column of pixels from
+/// YUV 4:2:0 to RGBA (the latter ony), using linear interpolation
+/// on the chroma samples.
+///
 /// The y, chroma_b, chroma_r, y_width, br_width parameters must obey the same
-/// requirements as in `yuv420_to_rgba`, plus:
+/// requirements as for `yuv420_to_rgba`, plus:
 ///  - `col` must be either 0 or y_width-1
 ///  - y_width must be even
 ///  - none of y_width, br_width, y_height, or br_height can be 0
@@ -256,24 +265,29 @@ fn process_edge_col(
     let y_height = y.len() / y_width;
     let br_height = chroma_b.len() / br_width;
 
-    // the top pixel is special, there is no need for interpolation
-    // the `col/2` will be rounded down for rightmost cols, which is what we want
-    let top_rgb = yuv_to_rgb((y[col], chroma_b[col / 2], chroma_r[col / 2]), luts);
-    rgba[(col * 4)..((col + 1) * 4)].copy_from_slice(&[top_rgb.0, top_rgb.1, top_rgb.2, 255]);
+    // This will be rounded down for rightmost columns, which is what we want.
+    let br_col = col / 2;
 
-    // I could probably do something with step_by, but couldn't be bothered
+    // The topmost pixels of these columns are special, there is no need for interpolation there.
+    let top_rgb = yuv_to_rgb((y[col], chroma_b[br_col], chroma_r[br_col]), luts);
+    rgba[col * 4..(col + 1) * 4].copy_from_slice(&[top_rgb.0, top_rgb.1, top_rgb.2, 255]);
+
+    // Processing two pixels at a time, between all vertical pairs of chroma samples.
+    // Instead of iterating with plain numbers and computing indices by hand, something could probably
+    // be figured out using step_by, but this should be good enough for these minority of pixels.
     for br_y in 0..br_height - 1 {
+        // Skipping the topmost pixel here
         let y_top_y = (br_y * 2) + 1;
 
         let top_yuv = (
             y[y_top_y * y_width + col],
-            chroma_b[br_y * br_width + col / 2],
-            chroma_r[br_y * br_width + col / 2],
+            chroma_b[br_y * br_width + br_col],
+            chroma_r[br_y * br_width + br_col],
         );
         let bottom_yuv = (
             y[(y_top_y + 1) * y_width + col],
-            chroma_b[(br_y + 1) * br_width + col / 2],
-            chroma_r[(br_y + 1) * br_width + col / 2],
+            chroma_b[(br_y + 1) * br_width + br_col],
+            chroma_r[(br_y + 1) * br_width + br_col],
         );
 
         let top_rgb = yuv_to_rgb(lerp_chroma(&top_yuv, &bottom_yuv), luts);
@@ -285,12 +299,11 @@ fn process_edge_col(
             .copy_from_slice(&[bottom_rgb.0, bottom_rgb.1, bottom_rgb.2, 255]);
     }
 
-    // bottom pixel, if needed
+    // Finally processing the bottom pixel, if needed
     if (y_height % 2) == 0 {
         let y_index = (y_height - 1) * y_width + col;
-        let br_index = (br_height - 1) * br_width + col / 2;
-        // the top pixel is special, there is no need for interpolation
-        // the `col/2` will be rounded down for rightmost cols, which is what we want
+        let br_index = (br_height - 1) * br_width + br_col;
+        // The top pixel is aksi special, there is no need for interpolation here either.
         let rgb = yuv_to_rgb((y[y_index], chroma_b[br_index], chroma_r[br_index]), luts);
         rgba[y_index * 4..(y_index + 1) * 4].copy_from_slice(&[rgb.0, rgb.1, rgb.2, 255]);
     }
