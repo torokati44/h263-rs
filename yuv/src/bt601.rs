@@ -1,95 +1,55 @@
+
+
 //! YUV-to-RGB decode
 
 use lazy_static::lazy_static;
 
-/// Precomputes and stores the linear functions for converting YUV (YCb'Cr' to be precise)
-/// colors to RGB (sRGB-like, with gamma) colors, in signed 12.4 fixed-point integer format.
-///
-/// Since the incoming components are u8, and there is only ever at most 3 of them added
-/// at once (when computing the G channel), only about 10 bits would be used if they were
-/// u8 - so to get some more precision (and reduce potential stepping artifacts), might
-/// as well use about 14 of the 15 (not counting the sign bit) available in i16.
-struct LUTs {
-    /// the contribution of the Y component into all RGB channels
-    pub y_to_gray: [i16; 256],
-    /// the contribution of the V (Cr') component into the R channel
-    pub cr_to_r: [i16; 256],
-    /// the contribution of the V (Cr') component into the G channel
-    pub cr_to_g: [i16; 256],
-    /// the contribution of the U (Cb') component into the G channel
-    pub cb_to_g: [i16; 256],
-    /// the contribution of the U (Cb') component into the B channel
-    pub cb_to_b: [i16; 256],
-}
+use std::simd::i32x4;
 
-impl LUTs {
-    pub fn new() -> LUTs {
-        let mut y_to_gray = [0i16; 256];
-        let mut cr_to_r = [0i16; 256];
-        let mut cr_to_g = [0i16; 256];
-        let mut cb_to_g = [0i16; 256];
-        let mut cb_to_b = [0i16; 256];
 
-        // - Y needs to be remapped linearly from 16..235 to 0..255
-        // - Cr' and Cb' (a.k.a. V and U) need to be remapped linearly from 16..240 to 0..255,
-        //     then shifted to -128..127, and then scaled by the appropriate coefficients
-        // - Finally all values are multiplied by 16 (1<<4) to turn them into 12.4 format, and rounded to integer.
-
-        for i in 0..256 {
-            let f = i as f32;
-
-            // According to Wikipedia, these are the exact values from the
-            // ITU-R BT.601 standard. See the last group of equations on:
-            // https://en.wikipedia.org/wiki/YCbCr#ITU-R_BT.601_conversion
-            let y2gray = (255.0 / 219.0) * (f - 16.0);
-            let cr2r = (255.0 / 224.0) * 1.402 * (f - 128.0);
-            let cr2g = -(255.0 / 224.0) * 1.402 * (0.299 / 0.587) * (f - 128.0);
-            let cb2g = -(255.0 / 224.0) * 1.772 * (0.114 / 0.587) * (f - 128.0);
-            let cb2b = (255.0 / 224.0) * 1.772 * (f - 128.0);
-
-            // Converting to 12.4 format and rounding before storing
-            y_to_gray[i] = (y2gray * 16.0).round() as i16;
-            cr_to_r[i] = (cr2r * 16.0).round() as i16;
-            cr_to_g[i] = (cr2g * 16.0).round() as i16;
-            cb_to_g[i] = (cb2g * 16.0).round() as i16;
-            cb_to_b[i] = (cb2b * 16.0).round() as i16;
-        }
-
-        LUTs {
-            y_to_gray,
-            cr_to_r,
-            cr_to_g,
-            cb_to_g,
-            cb_to_b,
-        }
-    }
-}
-
-lazy_static! {
-    static ref LUTS: LUTs = LUTs::new();
-}
-
+// operates on 4 pixels at a time
 #[inline]
-fn yuv_to_rgb(yuv: (u8, u8, u8), luts: &LUTs) -> (u8, u8, u8) {
-    let (y, cb, cr) = yuv;
+fn yuv_to_rgb_simd(yuv: (i32x4, i32x4, i32x4)) -> (i32x4, i32x4, i32x4) {
+    let (mut y, mut cb, mut cr) = yuv;
 
-    // We rely on the optimizers in rustc/LLVM to eliminate the bounds checks when indexing
-    // into the fixed 256-long arrays in `luts` with indices coming in as `u8` parameters.
-    // This is crucial for performance, as this function runs in a fairly tight loop, on all pixels.
-    // I verified that this is actually happening, see here: https://rust.godbolt.org/z/vWzesYzbq
-    // And benchmarking showed no time difference from an `unsafe` + `get_unchecked()` solution.
-    let gray = luts.y_to_gray[y as usize];
+    // TODO reuse splatted constants across ivocations? does that make sense?
 
-    // The `(... + 8) >> 4` parts convert back from 12.4 fixed-point to `u8` with correct rounding.
-    // (At least for positive numbers - any negative numbers that might occur will be clamped to 0 anyway.)
-    let r = (gray + luts.cr_to_r[cr as usize] + 8) >> 4;
-    let g = (gray + luts.cr_to_g[cr as usize] + luts.cb_to_g[cb as usize] + 8) >> 4;
-    let b = (gray + luts.cb_to_b[cb as usize] + 8) >> 4;
+    let gray = (y - i32x4::splat(16)) * i32x4::splat(76309);
+
+    let _128 = i32x4::splat(128);
+    cr -= _128;
+    cb -= _128;
+
+    let cr2r = cr * i32x4::splat(104597);
+    let cr2g = cr * i32x4::splat(-53279);
+    let cb2g = cb * i32x4::splat(-25675);
+    let cb2b = cb * i32x4::splat(132201);
+
+    // for rounding
+    let _32768 = i32x4::splat(32768);
+
+    let r = (gray + cr2r + _32768) >> 16;
+    let g = (gray + cr2g + cb2g + _32768) >> 16;
+    let b = (gray + cb2b + _32768) >> 16;
 
     (
-        r.clamp(0, 255) as u8,
-        g.clamp(0, 255) as u8,
-        b.clamp(0, 255) as u8,
+        r.clamp(i32x4::splat(0), i32x4::splat(255)),
+        g.clamp(i32x4::splat(0), i32x4::splat(255)),
+        b.clamp(i32x4::splat(0), i32x4::splat(255)),
+    )
+}
+
+
+// operates on 4 pixels at a time
+#[inline]
+fn yuv_to_rgb(yuv: (u8, u8, u8)) -> (u8, u8, u8) {
+
+    let (r, g, b) = yuv_to_rgb_simd((i32x4::splat(yuv.0 as i32), i32x4::splat(yuv.1 as i32), i32x4::splat(yuv.2 as i32)));
+
+    (
+        r.as_array()[0] as u8,
+        g.as_array()[0] as u8,
+        b.as_array()[0] as u8,
     )
 }
 
@@ -138,9 +98,6 @@ pub fn yuv420_to_rgba(
     let mut rgba = vec![0; y.len() * 4];
     let rgba_stride = y_width * 4; // 4 bytes per pixel, interleaved
 
-    // making sure that the "is it initialized already?" check is only done once per frame by getting a direct reference
-    let luts: &LUTs = &*LUTS;
-
     // Iteration is done in a row-major order to fit the slice layouts.
     for luma_rowindex in 0..y_height {
         let chroma_rowindex = luma_rowindex / 2;
@@ -150,20 +107,35 @@ pub fn yuv420_to_rgba(
         let cr_row = &chroma_r[chroma_rowindex * br_width..(chroma_rowindex + 1) * br_width];
         let rgba_row = &mut rgba[luma_rowindex * rgba_stride..(luma_rowindex + 1) * rgba_stride];
 
-        // Iterating on 2 pixels at a time, leaving off the last one if width is odd.
-        let y_iter = y_row.chunks_exact(2);
-        let cb_iter = cb_row.iter();
-        let cr_iter = cr_row.iter();
+        // Iterating on 4 pixels at a time, leaving off the last few if width is not divisible by 4
+        let y_iter = y_row.chunks_exact(4);
+        let cb_iter = cb_row.chunks_exact(2);
+        let cr_iter = cr_row.chunks_exact(2);
         // Similar to how Y is iterated on, but with 4 channels per pixel
-        let rgba_iter = rgba_row.chunks_exact_mut(8);
+        let rgba_iter = rgba_row.chunks_exact_mut(16);
 
         for (((y, cb), cr), rgba) in y_iter.zip(cb_iter).zip(cr_iter).zip(rgba_iter) {
-            let rgb0 = yuv_to_rgb((y[0], *cb, *cr), luts);
-            let rgb1 = yuv_to_rgb((y[1], *cb, *cr), luts);
+
+            let y = i32x4::from_array([y[0] as i32, y[1] as i32, y[2] as i32, y[3] as i32]);
+            let cb = i32x4::from_array([cb[0] as i32, cb[0] as i32, cb[1] as i32, cb[1] as i32]);
+            let cr = i32x4::from_array([cr[0] as i32, cr[0] as i32, cr[1] as i32, cr[1] as i32]);
+
+            let (r, g, b) = yuv_to_rgb_simd((y, cb, cr));
+
+            let r = r.as_array();
+            let g = g.as_array();
+            let b = b.as_array();
+
             // The output alpha values are fixed
-            rgba.copy_from_slice(&[rgb0.0, rgb0.1, rgb0.2, 255, rgb1.0, rgb1.1, rgb1.2, 255]);
+            rgba.copy_from_slice(&[
+                r[0] as u8, g[0] as u8, b[0] as u8, 255,
+                r[1] as u8, g[1] as u8, b[1] as u8, 255,
+                r[2] as u8, g[2] as u8, b[2] as u8, 255,
+                r[3] as u8, g[3] as u8, b[3] as u8, 255,
+                ]);
         }
 
+        /*
         // On odd wide pictures, the last pixel is not covered by the iteration above,
         // but is included in y_row and rgba_row.
         if y_width % 2 == 1 {
@@ -171,10 +143,10 @@ pub fn yuv420_to_rgba(
             let cb = cb_row.last().unwrap();
             let cr = cr_row.last().unwrap();
 
-            let rgb = yuv_to_rgb((*y, *cb, *cr), luts);
+            let rgb = yuv_to_rgb((*y, *cb, *cr), );
 
             rgba_row[rgba_stride - 4..rgba_stride].copy_from_slice(&[rgb.0, rgb.1, rgb.2, 255])
-        }
+        }*/
     }
 
     rgba
@@ -189,24 +161,24 @@ fn test_yuv_to_rgb() {
     // Peak colour difference = 16 and 240
 
     // not quite black
-    assert_eq!(yuv_to_rgb((17, 128, 128), &LUTS), (1, 1, 1));
+    assert_eq!(yuv_to_rgb((17, 128, 128)), (1, 1, 1));
     // exactly black
-    assert_eq!(yuv_to_rgb((16, 128, 128), &LUTS), (0, 0, 0));
+    assert_eq!(yuv_to_rgb((16, 128, 128)), (0, 0, 0));
     // and clamping also works
-    assert_eq!(yuv_to_rgb((15, 128, 128), &LUTS), (0, 0, 0));
-    assert_eq!(yuv_to_rgb((0, 128, 128), &LUTS), (0, 0, 0));
+    assert_eq!(yuv_to_rgb((15, 128, 128)), (0, 0, 0));
+    assert_eq!(yuv_to_rgb((0, 128, 128)), (0, 0, 0));
 
     // not quite white
-    assert_eq!(yuv_to_rgb((234, 128, 128), &LUTS), (254, 254, 254));
+    assert_eq!(yuv_to_rgb((234, 128, 128)), (254, 254, 254));
     // exactly white
-    assert_eq!(yuv_to_rgb((235, 128, 128), &LUTS), (255, 255, 255));
+    assert_eq!(yuv_to_rgb((235, 128, 128)), (255, 255, 255));
     // and clamping also works
-    assert_eq!(yuv_to_rgb((236, 128, 128), &LUTS), (255, 255, 255));
-    assert_eq!(yuv_to_rgb((255, 128, 128), &LUTS), (255, 255, 255));
+    assert_eq!(yuv_to_rgb((236, 128, 128)), (255, 255, 255));
+    assert_eq!(yuv_to_rgb((255, 128, 128)), (255, 255, 255));
 
     // (16 + 235) / 2 = 125.5, for middle grays
-    assert_eq!(yuv_to_rgb((125, 128, 128), &LUTS), (127, 127, 127));
-    assert_eq!(yuv_to_rgb((126, 128, 128), &LUTS), (128, 128, 128));
+    assert_eq!(yuv_to_rgb((125, 128, 128)), (127, 127, 127));
+    assert_eq!(yuv_to_rgb((126, 128, 128)), (128, 128, 128));
 }
 
 // Inverse conversion, for testing purposes only
@@ -257,43 +229,43 @@ fn test_rgb_to_yuv() {
 
 #[test]
 fn test_rgb_yuv_rgb_roundtrip_sanity() {
-    assert_eq!(yuv_to_rgb(rgb_to_yuv((0, 0, 0)), &LUTS), (0, 0, 0));
+    assert_eq!(yuv_to_rgb(rgb_to_yuv((0, 0, 0))), (0, 0, 0));
     assert_eq!(
-        yuv_to_rgb(rgb_to_yuv((127, 127, 127)), &LUTS),
+        yuv_to_rgb(rgb_to_yuv((127, 127, 127))),
         (127, 127, 127)
     );
     assert_eq!(
-        yuv_to_rgb(rgb_to_yuv((128, 128, 128)), &LUTS),
+        yuv_to_rgb(rgb_to_yuv((128, 128, 128))),
         (128, 128, 128)
     );
     assert_eq!(
-        yuv_to_rgb(rgb_to_yuv((255, 255, 255)), &LUTS),
+        yuv_to_rgb(rgb_to_yuv((255, 255, 255))),
         (255, 255, 255)
     );
 
     assert_eq!(
-        yuv_to_rgb(rgb_to_yuv((255, 0, 0)), &LUTS),
+        yuv_to_rgb(rgb_to_yuv((255, 0, 0))),
         (254, 0, 0) // !!! there is a rounding error here
     );
     assert_eq!(
-        yuv_to_rgb(rgb_to_yuv((0, 255, 0)), &LUTS),
+        yuv_to_rgb(rgb_to_yuv((0, 255, 0))),
         (0, 255, 1) // !!! there is a rounding error here
     );
     assert_eq!(
-        yuv_to_rgb(rgb_to_yuv((0, 0, 255)), &LUTS),
+        yuv_to_rgb(rgb_to_yuv((0, 0, 255))),
         (0, 0, 255) // there is NO rounding error here
     );
 
     assert_eq!(
-        yuv_to_rgb(rgb_to_yuv((0, 255, 255)), &LUTS),
+        yuv_to_rgb(rgb_to_yuv((0, 255, 255))),
         (1, 255, 255) // !!! there is a rounding error here
     );
     assert_eq!(
-        yuv_to_rgb(rgb_to_yuv((255, 0, 255)), &LUTS),
+        yuv_to_rgb(rgb_to_yuv((255, 0, 255))),
         (255, 0, 254) // !!! there is a rounding error here
     );
     assert_eq!(
-        yuv_to_rgb(rgb_to_yuv((255, 255, 0)), &LUTS),
+        yuv_to_rgb(rgb_to_yuv((255, 255, 0))),
         (255, 255, 0) // there is NO rounding error here
     );
 
@@ -310,7 +282,7 @@ fn test_rgb_yuv_rgb_roundtrip_sanity() {
         (188, 189, 34),
         (23, 190, 207),
     ] {
-        let rgb2 = yuv_to_rgb(rgb_to_yuv(rgb), &LUTS);
+        let rgb2 = yuv_to_rgb(rgb_to_yuv(rgb));
         // Allowing for a difference of at most 1 on each component in both directions,
         // to account for the limited precision in YUV form, and two roundings
         assert!((rgb.0 as i32 - rgb2.0 as i32).abs() <= 1);
@@ -318,7 +290,7 @@ fn test_rgb_yuv_rgb_roundtrip_sanity() {
         assert!((rgb.2 as i32 - rgb2.2 as i32).abs() <= 1);
     }
 }
-
+/*
 #[test]
 fn test_yuv420_to_rgba() {
     // empty picture
@@ -405,5 +377,6 @@ fn test_yuv420_to_rgba() {
     );
 
     // The middle row/column of pixels use the top/left row/column of chroma samples:
-    assert_eq!(yuv_to_rgb((125, 90, 240), &LUTS), (255, 51, 50));
+    assert_eq!(yuv_to_rgb((125, 90, 240)), (255, 51, 50));
 }
+*/
