@@ -2,7 +2,7 @@
 
 use std::cmp::{max, min};
 
-use std::simd::*;
+use wide::*;
 
 /*
 use lazy_static::lazy_static;

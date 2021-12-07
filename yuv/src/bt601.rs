@@ -2,9 +2,8 @@
 
 //! YUV-to-RGB decode
 
-use lazy_static::lazy_static;
 
-use std::simd::i32x4;
+use wide::i32x4;
 
 
 // operates on 4 pixels at a time
@@ -28,14 +27,14 @@ fn yuv_to_rgb_simd(yuv: (i32x4, i32x4, i32x4)) -> (i32x4, i32x4, i32x4) {
     // for rounding
     let _32768 = i32x4::splat(32768);
 
-    let r = (gray + cr2r + _32768) >> 16;
-    let g = (gray + cr2g + cb2g + _32768) >> 16;
-    let b = (gray + cb2b + _32768) >> 16;
+    let r : i32x4 = (gray + cr2r + _32768) >> 16;
+    let g : i32x4 = (gray + cr2g + cb2g + _32768) >> 16;
+    let b : i32x4 = (gray + cb2b + _32768) >> 16;
 
     (
-        r.clamp(i32x4::splat(0), i32x4::splat(255)),
-        g.clamp(i32x4::splat(0), i32x4::splat(255)),
-        b.clamp(i32x4::splat(0), i32x4::splat(255)),
+        r.max(i32x4::splat(0)).min(i32x4::splat(255)),
+        g.max(i32x4::splat(0)).min(i32x4::splat(255)),
+        b.max(i32x4::splat(0)).min(i32x4::splat(255)),
     )
 }
 
@@ -47,9 +46,9 @@ fn yuv_to_rgb(yuv: (u8, u8, u8)) -> (u8, u8, u8) {
     let (r, g, b) = yuv_to_rgb_simd((i32x4::splat(yuv.0 as i32), i32x4::splat(yuv.1 as i32), i32x4::splat(yuv.2 as i32)));
 
     (
-        r.as_array()[0] as u8,
-        g.as_array()[0] as u8,
-        b.as_array()[0] as u8,
+        r.to_array()[0] as u8,
+        g.to_array()[0] as u8,
+        b.to_array()[0] as u8,
     )
 }
 
@@ -116,15 +115,15 @@ pub fn yuv420_to_rgba(
 
         for (((y, cb), cr), rgba) in y_iter.zip(cb_iter).zip(cr_iter).zip(rgba_iter) {
 
-            let y = i32x4::from_array([y[0] as i32, y[1] as i32, y[2] as i32, y[3] as i32]);
-            let cb = i32x4::from_array([cb[0] as i32, cb[0] as i32, cb[1] as i32, cb[1] as i32]);
-            let cr = i32x4::from_array([cr[0] as i32, cr[0] as i32, cr[1] as i32, cr[1] as i32]);
+            let y = i32x4::from([y[0] as i32, y[1] as i32, y[2] as i32, y[3] as i32]);
+            let cb = i32x4::from([cb[0] as i32, cb[0] as i32, cb[1] as i32, cb[1] as i32]);
+            let cr = i32x4::from([cr[0] as i32, cr[0] as i32, cr[1] as i32, cr[1] as i32]);
 
             let (r, g, b) = yuv_to_rgb_simd((y, cb, cr));
 
-            let r = r.as_array();
-            let g = g.as_array();
-            let b = b.as_array();
+            let r = r.to_array();
+            let g = g.to_array();
+            let b = b.to_array();
 
             // The output alpha values are fixed
             rgba.copy_from_slice(&[

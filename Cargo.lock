@@ -15,6 +15,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
+name = "bytemuck"
+version = "1.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72957246c41db82b8ef88a5486143830adeb8227ef9837740bdec67724cf2c5b"
+
+[[package]]
 name = "h263-rs"
 version = "0.1.0"
 dependencies = [
@@ -22,13 +28,14 @@ dependencies = [
  "lazy_static",
  "num-traits",
  "thiserror",
+ "wide",
 ]
 
 [[package]]
 name = "h263-rs-yuv"
 version = "0.1.0"
 dependencies = [
- "lazy_static",
+ "wide",
 ]
 
 [[package]]
@@ -62,6 +69,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d0b9745dc2debf507c8422de05d7226cc1f0644216dfdfead988f9b1ab32a7"
 dependencies = [
  "proc-macro2",
+]
+
+[[package]]
+name = "safe_arch"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "794821e4ccb0d9f979512f9c1973480123f9bd62a90d74ab0f9426fcf8f4a529"
+dependencies = [
+ "bytemuck",
 ]
 
 [[package]]
@@ -100,3 +116,13 @@ name = "unicode-xid"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ccb82d61f80a663efe1f787a51b16b5a51e3314d6ac365b08639f52387b33f3"
+
+[[package]]
+name = "wide"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2f2548e954f6619da26c140d020e99e59a2ca872a11f1e6250b829e8c96c893"
+dependencies = [
+ "bytemuck",
+ "safe_arch",
+]
