@@ -1,17 +1,14 @@
-
-
 //! YUV-to-RGB decode
 
-
 use wide::i32x4;
-
 
 // operates on 4 pixels at a time
 #[inline]
 fn yuv_to_rgb_simd(yuv: (i32x4, i32x4, i32x4)) -> (i32x4, i32x4, i32x4) {
-    let (mut y, mut cb, mut cr) = yuv;
+    let (y, mut cb, mut cr) = yuv;
 
-    // TODO reuse splatted constants across ivocations? does that make sense?
+    // The -16 and -128 are simply undoing the offsets in the input representation,
+    // then numbers are the coefficients converted to 16.16 fixed point and rounded.
 
     let gray = (y - i32x4::splat(16)) * i32x4::splat(76309);
 
@@ -24,26 +21,32 @@ fn yuv_to_rgb_simd(yuv: (i32x4, i32x4, i32x4)) -> (i32x4, i32x4, i32x4) {
     let cb2g = cb * i32x4::splat(-25675);
     let cb2b = cb * i32x4::splat(132201);
 
-    // for rounding
+    // This is 0.5 in 16.16 format, added to make the rightshift round correctly
     let _32768 = i32x4::splat(32768);
 
-    let r : i32x4 = (gray + cr2r + _32768) >> 16;
-    let g : i32x4 = (gray + cr2g + cb2g + _32768) >> 16;
-    let b : i32x4 = (gray + cb2b + _32768) >> 16;
+    // We could skip the shift here, then cast the result into [u8; 16], and take
+    // bytes 2, 4, 10, 14 instead (after clamping), but it's not any faster, it seems.
+    let r: i32x4 = (gray + cr2r + _32768) >> 16;
+    let g: i32x4 = (gray + cr2g + cb2g + _32768) >> 16;
+    let b: i32x4 = (gray + cb2b + _32768) >> 16;
 
+    // Clamping to the valid output range
+    let _255 = i32x4::splat(255);
     (
-        r.max(i32x4::splat(0)).min(i32x4::splat(255)),
-        g.max(i32x4::splat(0)).min(i32x4::splat(255)),
-        b.max(i32x4::splat(0)).min(i32x4::splat(255)),
+        r.max(i32x4::ZERO).min(_255),
+        g.max(i32x4::ZERO).min(_255),
+        b.max(i32x4::ZERO).min(_255),
     )
 }
 
-
-// operates on 4 pixels at a time
+#[cfg(test)]
 #[inline]
 fn yuv_to_rgb(yuv: (u8, u8, u8)) -> (u8, u8, u8) {
-
-    let (r, g, b) = yuv_to_rgb_simd((i32x4::splat(yuv.0 as i32), i32x4::splat(yuv.1 as i32), i32x4::splat(yuv.2 as i32)));
+    let (r, g, b) = yuv_to_rgb_simd((
+        i32x4::splat(yuv.0 as i32),
+        i32x4::splat(yuv.1 as i32),
+        i32x4::splat(yuv.2 as i32),
+    ));
 
     (
         r.to_array()[0] as u8,
@@ -106,32 +109,33 @@ pub fn yuv420_to_rgba(
         let cr_row = &chroma_r[chroma_rowindex * br_width..(chroma_rowindex + 1) * br_width];
         let rgba_row = &mut rgba[luma_rowindex * rgba_stride..(luma_rowindex + 1) * rgba_stride];
 
-        // Iterating on 4 pixels at a time, leaving off the last few if width is not divisible by 4
+        // Iterating on 4 pixels (in a horizontal row arrangement) at a time,
+        // leaving off the last few on the right if width is not divisible by 4
         let y_iter = y_row.chunks_exact(4);
+        // We need half as many chroma samples for each iteration
         let cb_iter = cb_row.chunks_exact(2);
         let cr_iter = cr_row.chunks_exact(2);
         // Similar to how Y is iterated on, but with 4 channels per pixel
         let rgba_iter = rgba_row.chunks_exact_mut(16);
 
         for (((y, cb), cr), rgba) in y_iter.zip(cb_iter).zip(cr_iter).zip(rgba_iter) {
-
+            // Expanding the 4 bytes into a i32x4
             let y = i32x4::from([y[0] as i32, y[1] as i32, y[2] as i32, y[3] as i32]);
+            // And duplicating chroma samples horizontally
             let cb = i32x4::from([cb[0] as i32, cb[0] as i32, cb[1] as i32, cb[1] as i32]);
             let cr = i32x4::from([cr[0] as i32, cr[0] as i32, cr[1] as i32, cr[1] as i32]);
 
             let (r, g, b) = yuv_to_rgb_simd((y, cb, cr));
 
-            let r = r.to_array();
-            let g = g.to_array();
-            let b = b.to_array();
+            let r: &[i32; 4] = bytemuck::cast_ref::<i32x4, [i32; 4]>(&r);
+            let g: &[i32; 4] = bytemuck::cast_ref::<i32x4, [i32; 4]>(&g);
+            let b: &[i32; 4] = bytemuck::cast_ref::<i32x4, [i32; 4]>(&b);
 
             // The output alpha values are fixed
             rgba.copy_from_slice(&[
-                r[0] as u8, g[0] as u8, b[0] as u8, 255,
-                r[1] as u8, g[1] as u8, b[1] as u8, 255,
-                r[2] as u8, g[2] as u8, b[2] as u8, 255,
-                r[3] as u8, g[3] as u8, b[3] as u8, 255,
-                ]);
+                r[0] as u8, g[0] as u8, b[0] as u8, 255, r[1] as u8, g[1] as u8, b[1] as u8, 255,
+                r[2] as u8, g[2] as u8, b[2] as u8, 255, r[3] as u8, g[3] as u8, b[3] as u8, 255,
+            ]);
         }
 
         /*
@@ -229,18 +233,9 @@ fn test_rgb_to_yuv() {
 #[test]
 fn test_rgb_yuv_rgb_roundtrip_sanity() {
     assert_eq!(yuv_to_rgb(rgb_to_yuv((0, 0, 0))), (0, 0, 0));
-    assert_eq!(
-        yuv_to_rgb(rgb_to_yuv((127, 127, 127))),
-        (127, 127, 127)
-    );
-    assert_eq!(
-        yuv_to_rgb(rgb_to_yuv((128, 128, 128))),
-        (128, 128, 128)
-    );
-    assert_eq!(
-        yuv_to_rgb(rgb_to_yuv((255, 255, 255))),
-        (255, 255, 255)
-    );
+    assert_eq!(yuv_to_rgb(rgb_to_yuv((127, 127, 127))), (127, 127, 127));
+    assert_eq!(yuv_to_rgb(rgb_to_yuv((128, 128, 128))), (128, 128, 128));
+    assert_eq!(yuv_to_rgb(rgb_to_yuv((255, 255, 255))), (255, 255, 255));
 
     assert_eq!(
         yuv_to_rgb(rgb_to_yuv((255, 0, 0))),
