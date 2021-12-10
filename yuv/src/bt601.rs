@@ -31,6 +31,8 @@ fn yuv_to_rgb_simd(yuv: (i32x4, i32x4, i32x4)) -> (i32x4, i32x4, i32x4) {
     let b: i32x4 = (gray + cb2b + _32768) >> 16;
 
     // Clamping to the valid output range
+    // A simple clamp(x, 0, 255) doesn't work, because it seems to
+    // operate on entire tuples, instead of each element separately.
     let _255 = i32x4::splat(255);
     (
         r.max(i32x4::ZERO).min(_255),
@@ -126,16 +128,14 @@ pub fn yuv420_to_rgba(
             let cr = i32x4::from([cr[0] as i32, cr[0] as i32, cr[1] as i32, cr[1] as i32]);
 
             let (r, g, b) = yuv_to_rgb_simd((y, cb, cr));
-
-            let r: &[i32; 4] = bytemuck::cast_ref::<i32x4, [i32; 4]>(&r);
-            let g: &[i32; 4] = bytemuck::cast_ref::<i32x4, [i32; 4]>(&g);
-            let b: &[i32; 4] = bytemuck::cast_ref::<i32x4, [i32; 4]>(&b);
-
             // The output alpha values are fixed
-            rgba.copy_from_slice(&[
-                r[0] as u8, g[0] as u8, b[0] as u8, 255, r[1] as u8, g[1] as u8, b[1] as u8, 255,
-                r[2] as u8, g[2] as u8, b[2] as u8, 255, r[3] as u8, g[3] as u8, b[3] as u8, 255,
-            ]);
+            let a = i32x4::splat(255);
+
+            #[cfg(target_endian = "little")]
+            let rgba_4x = ((r) | (g << 8)) | ((b << 16) | (a << 24));
+            #[cfg(target_endian = "big")] // I haven't tested this, but should work
+            let rgba_4x = ((r << 24) | (g << 16)) | ((b << 8) | (a));
+            rgba.copy_from_slice(bytemuck::cast_ref::<i32x4, [u8; 16]>(&rgba_4x));
         }
 
         /*
