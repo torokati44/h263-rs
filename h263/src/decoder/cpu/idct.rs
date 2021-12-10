@@ -36,7 +36,7 @@ lazy_static! {
 */
 
 
-
+/*
 // This is the precomputed version of the table above
 #[rustfmt::skip]
 #[allow(clippy::approx_constant)]
@@ -51,36 +51,36 @@ const BASIS_TABLE: [[f32; 8]; 8] = [
     [ 0.19509023, -0.55557,     0.83146936, -0.9807852,   0.98078525, -0.83147013,  0.55557114, -0.19508967, ],
 ];
 
+
+// This is the precomputed version of the table above
+#[rustfmt::skip]
+#[allow(clippy::approx_constant)]
+const BASIS_TABLE_SIMD: [[[f32; 4]; 2]; 8] = [
+    [ [0.70710677,  0.70710677,  0.70710677,  0.70710677  ], [0.70710677,  0.70710677,  0.70710677,  0.70710677   ], ],
+    [ [0.98078525,  0.8314696,   0.5555702,   0.19509023, ], [-0.19509032, -0.55557036, -0.83146966, -0.9807853,  ], ],
+    [ [0.9238795,   0.38268343, -0.38268352, -0.9238796,  ], [-0.9238795,  -0.38268313,  0.3826836,   0.92387956, ], ],
+    [ [0.8314696,  -0.19509032, -0.9807853,  -0.55557,    ], [ 0.55557007,  0.98078525,  0.19509007, -0.8314698,  ], ],
+    [ [0.70710677, -0.70710677, -0.70710665,  0.707107,   ], [ 0.70710677, -0.70710725, -0.70710653,  0.7071068,  ], ],
+    [ [0.5555702,  -0.9807853,   0.19509041,  0.83146936, ], [-0.8314698,  -0.19508928,  0.9807853,  -0.55557007, ], ],
+    [ [0.38268343, -0.9238795,   0.92387974, -0.3826839,  ], [-0.38268384,  0.9238793,  -0.92387974,  0.3826839,  ], ],
+    [ [0.19509023, -0.55557,     0.83146936, -0.9807852,  ], [ 0.98078525, -0.83147013,  0.55557114, -0.19508967, ], ],
+];
+*/
+
+// This is the precomputed version of the table above
+#[rustfmt::skip]
+#[allow(clippy::approx_constant)]
+const BASIS_TABLE_SIMD_8: [[f32; 8]; 8] = [
+    [0.70710677,  0.70710677,  0.70710677,  0.70710677,   0.70710677,  0.70710677,  0.70710677,  0.70710677   ],
+    [0.98078525,  0.8314696,   0.5555702,   0.19509023,  -0.19509032, -0.55557036, -0.83146966, -0.9807853,  ],
+    [0.9238795,   0.38268343, -0.38268352, -0.9238796,   -0.9238795,  -0.38268313,  0.3826836,   0.92387956, ],
+    [0.8314696,  -0.19509032, -0.9807853,  -0.55557,      0.55557007,  0.98078525,  0.19509007, -0.8314698,  ],
+    [0.70710677, -0.70710677, -0.70710665,  0.707107,     0.70710677, -0.70710725, -0.70710653,  0.7071068,  ],
+    [0.5555702,  -0.9807853,   0.19509041,  0.83146936,  -0.8314698,  -0.19508928,  0.9807853,  -0.55557007, ],
+    [0.38268343, -0.9238795,   0.92387974, -0.3826839,   -0.38268384,  0.9238793,  -0.92387974,  0.3826839,  ],
+    [0.19509023, -0.55557,     0.83146936, -0.9807852,    0.98078525, -0.83147013,  0.55557114, -0.19508967, ],
+];
 /*
-// This is the precomputed version of the table above
-#[rustfmt::skip]
-#[allow(clippy::approx_constant)]
-const BASIS_TABLE_SIMD: [[f32x4; 2]; 8] = [
-    [ f32x4::from_array([0.70710677,  0.70710677,  0.70710677,  0.70710677  ]), f32x4::from_array([0.70710677,  0.70710677,  0.70710677,  0.70710677   ]), ],
-    [ f32x4::from_array([0.98078525,  0.8314696,   0.5555702,   0.19509023, ]), f32x4::from_array([-0.19509032, -0.55557036, -0.83146966, -0.9807853,  ]), ],
-    [ f32x4::from_array([0.9238795,   0.38268343, -0.38268352, -0.9238796,  ]), f32x4::from_array([-0.9238795,  -0.38268313,  0.3826836,   0.92387956, ]), ],
-    [ f32x4::from_array([0.8314696,  -0.19509032, -0.9807853,  -0.55557,    ]), f32x4::from_array([ 0.55557007,  0.98078525,  0.19509007, -0.8314698,  ]), ],
-    [ f32x4::from_array([0.70710677, -0.70710677, -0.70710665,  0.707107,   ]), f32x4::from_array([ 0.70710677, -0.70710725, -0.70710653,  0.7071068,  ]), ],
-    [ f32x4::from_array([0.5555702,  -0.9807853,   0.19509041,  0.83146936, ]), f32x4::from_array([-0.8314698,  -0.19508928,  0.9807853,  -0.55557007, ]), ],
-    [ f32x4::from_array([0.38268343, -0.9238795,   0.92387974, -0.3826839,  ]), f32x4::from_array([-0.38268384,  0.9238793,  -0.92387974,  0.3826839,  ]), ],
-    [ f32x4::from_array([0.19509023, -0.55557,     0.83146936, -0.9807852,  ]), f32x4::from_array([ 0.98078525, -0.83147013,  0.55557114, -0.19508967, ]), ],
-];
-
-
-// This is the precomputed version of the table above
-#[rustfmt::skip]
-#[allow(clippy::approx_constant)]
-const BASIS_TABLE_SIMD_8: [f32x8; 8] = [
-    f32x8::from_array([0.70710677,  0.70710677,  0.70710677,  0.70710677,   0.70710677,  0.70710677,  0.70710677,  0.70710677   ]),
-    f32x8::from_array([0.98078525,  0.8314696,   0.5555702,   0.19509023,  -0.19509032, -0.55557036, -0.83146966, -0.9807853,  ]),
-    f32x8::from_array([0.9238795,   0.38268343, -0.38268352, -0.9238796,   -0.9238795,  -0.38268313,  0.3826836,   0.92387956, ]),
-    f32x8::from_array([0.8314696,  -0.19509032, -0.9807853,  -0.55557,      0.55557007,  0.98078525,  0.19509007, -0.8314698,  ]),
-    f32x8::from_array([0.70710677, -0.70710677, -0.70710665,  0.707107,     0.70710677, -0.70710725, -0.70710653,  0.7071068,  ]),
-    f32x8::from_array([0.5555702,  -0.9807853,   0.19509041,  0.83146936,  -0.8314698,  -0.19508928,  0.9807853,  -0.55557007, ]),
-    f32x8::from_array([0.38268343, -0.9238795,   0.92387974, -0.3826839,   -0.38268384,  0.9238793,  -0.92387974,  0.3826839,  ]),
-    f32x8::from_array([0.19509023, -0.55557,     0.83146936, -0.9807852,    0.98078525, -0.83147013,  0.55557114, -0.19508967, ]),
-];
-
 /// Performs a one-dimensional IDCT on the input, using some lookup tables
 /// for the scaling of the DC component, and for the cosine values to be used.
 #[inline]
@@ -90,29 +90,31 @@ fn idct_1d_simd(input: &[f32; 8], output: &mut [f32; 8]) {
 
     for freq in 0..8 {
         let inp = f32x4::splat(input[freq]);
-        output_0 += inp * BASIS_TABLE_SIMD[freq][0];
-        output_1 += inp * BASIS_TABLE_SIMD[freq][1];
+        output_0 += inp * f32x4::from(BASIS_TABLE_SIMD[freq][0]);
+        output_1 += inp * f32x4::from(BASIS_TABLE_SIMD[freq][1]);
     }
 
-    output[0..4].copy_from_slice(output_0.as_array());
-    output[4..8].copy_from_slice(output_1.as_array());
+    output[0..4].copy_from_slice(bytemuck::cast_ref::<f32x4, [f32; 4]>(&output_0));
+    output[4..8].copy_from_slice(bytemuck::cast_ref::<f32x4, [f32; 4]>(&output_1));
 }
+*/
+
 
 
 /// Performs a one-dimensional IDCT on the input, using some lookup tables
 /// for the scaling of the DC component, and for the cosine values to be used.
 #[inline]
 fn idct_1d_simd_8(input: &[f32; 8], output: &mut [f32; 8]) {
-    let mut out = f32x8::splat(0.0);
+    let mut out = f32x8::ZERO;
 
     for freq in 0..8 {
-        out += f32x8::splat(input[freq]) * BASIS_TABLE_SIMD_8[freq];
+        out += f32x8::splat(input[freq]) * f32x8::from(BASIS_TABLE_SIMD_8[freq]);
     }
 
-    output[0..8].copy_from_slice(out.as_array());
+    output.copy_from_slice(bytemuck::cast_ref::<f32x8, [f32; 8]>(&out));
 }
-*/
 
+/*
 /// Performs a one-dimensional IDCT on the input, using some lookup tables
 /// for the scaling of the DC component, and for the cosine values to be used.
 fn idct_1d(input: &[f32; 8], output: &mut [f32; 8]) {
@@ -123,7 +125,7 @@ fn idct_1d(input: &[f32; 8], output: &mut [f32; 8]) {
         }
     }
 }
-
+*/
 /// Given a list of reconstructed IDCT levels, transform it out of the
 /// frequency domain.
 ///
@@ -163,14 +165,14 @@ pub fn idct_channel(
             let block = &block_levels[block_id];
 
             for row in 0..8 {
-                idct_1d(&block[row], &mut idct_output[row]);
+                idct_1d_simd_8(&block[row], &mut idct_output[row]);
                 for (i, interim_row) in idct_intermediate.iter_mut().enumerate() {
                     interim_row[row] = idct_output[row][i]; // there is a transposition here
                 }
             }
 
             for row in 0..8 {
-                idct_1d(&idct_intermediate[row], &mut idct_output[row]);
+                idct_1d_simd_8(&idct_intermediate[row], &mut idct_output[row]);
             }
 
             // The inverted notation of the `x` and `y` loops is intended to
