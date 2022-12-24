@@ -49,12 +49,28 @@ const BASIS_TABLE: [[f32; 8]; 8] = [
 
 /// Performs a one-dimensional IDCT on the input, using some lookup tables
 /// for the scaling of the DC component, and for the cosine values to be used.
+#[inline(never)]
 fn idct_1d(input: &[f32; 8], output: &mut [f32; 8]) {
     *output = [0.0; 8];
     for (i, out) in output.iter_mut().enumerate() {
         // Do your magic, autovectorizer! Thanks...
         for freq in 0..8 {
             *out += input[freq] * BASIS_TABLE[freq][i];
+        }
+    }
+}
+
+#[inline(never)]
+fn idct_1d_8xt(input: &[[f32; 8]; 8], output: &mut [[f32; 8]; 8]) {
+    *output = [[0.0; 8]; 8];
+
+    for (freq, input_row) in input.iter().enumerate() {
+        let basis = &BASIS_TABLE[freq];
+        for (b, output_row) in basis.iter().zip(output.iter_mut()) {
+            // Do your magic, autovectorizer! Thanks...
+            for (iv, ov) in input_row.iter().zip(output_row.iter_mut()) {
+                *ov += iv * b;
+            }
         }
     }
 }
@@ -98,22 +114,15 @@ pub fn idct_channel(
             let block = &block_levels[block_id];
 
             for row in 0..8 {
-                idct_1d(&block[row], &mut idct_output[row]);
-                for (i, interim_row) in idct_intermediate.iter_mut().enumerate() {
-                    interim_row[row] = idct_output[row][i]; // there is a transposition here
-                }
+                idct_1d(&block[row], &mut idct_intermediate[row]);
             }
 
-            for row in 0..8 {
-                idct_1d(&idct_intermediate[row], &mut idct_output[row]);
-            }
+            idct_1d_8xt(&idct_intermediate, &mut idct_output);
 
-            // The inverted notation of the `x` and `y` loops is intended to
-            // reverse the above transposition
             for (y_offset, idct_row) in idct_output.iter().enumerate() {
                 for (x_offset, idct) in idct_row.iter().enumerate() {
-                    let x = x_base * 8 + x_offset;
-                    let y = y_base * 8 + y_offset;
+                    let x = x_base * 8 + y_offset;
+                    let y = y_base * 8 + x_offset;
 
                     if x >= output_samples_per_line {
                         continue;
