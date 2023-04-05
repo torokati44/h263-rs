@@ -54,23 +54,15 @@ pub fn deblock(data: &[u8], width: usize, strength: u8) -> Vec<u8> {
     // horizontal edges
     let mut edge_y = 8; // the index of the C sample
     while edge_y <= height - 2 {
-        for x in 0..width {
-            let idx_A = (edge_y - 2) * width + x;
-            let idx_B = (edge_y - 1) * width + x;
-            let idx_C = (edge_y + 0) * width + x;
-            let idx_D = (edge_y + 1) * width + x;
 
-            let mut A = result[idx_A];
-            let mut B = result[idx_B];
-            let mut C = result[idx_C];
-            let mut D = result[idx_D];
+        let (_, rest) = result.split_at_mut((edge_y - 2) * width);
+        let (row_A, rest) = rest.split_at_mut(width);
+        let (row_B, rest) = rest.split_at_mut(width);
+        let (row_C, rest) = rest.split_at_mut(width);
+        let (row_D, _) = rest.split_at_mut(width);
 
-            process(&mut A, &mut B, &mut C, &mut D, strength);
-
-            result[idx_A] = A;
-            result[idx_B] = B;
-            result[idx_C] = C;
-            result[idx_D] = D;
+        for (((A, B), C), D) in row_A.iter_mut().zip(row_B).zip(row_C).zip(row_D) {
+            process(A, B, C, D, strength);
         }
 
         edge_y += 8;
