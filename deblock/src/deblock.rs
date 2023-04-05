@@ -9,13 +9,13 @@ pub const QUANT_TO_STRENGTH: [u8; 32] = [
 
 /// Figure J.2/H.263 – Parameter d1 as a function of parameter d for deblocking filter mode
 #[inline]
-fn up_down_ramp(x: i32, strength: i32) -> i32 {
+fn up_down_ramp(x: i16, strength: i16) -> i16 {
     x.signum() * (x.abs() - (2 * (x.abs() - strength)).max(0)).max(0)
 }
 
 /// Clips x to the range +/- abs(lim)
 #[inline]
-fn clipd1(x: i32, lim: i32) -> i32 {
+fn clipd1(x: i16, lim: i16) -> i16 {
     x.clamp(-lim.abs(), lim.abs())
 }
 
@@ -26,19 +26,20 @@ fn clipd1(x: i32, lim: i32) -> i32 {
 #[allow(non_snake_case)]
 #[inline]
 fn process(A: &mut u8, B: &mut u8, C: &mut u8, D: &mut u8, strength: u8) {
-    let d: i32 = (*A as i32 - 4 * *B as i32 + 4 * *C as i32 - *D as i32) / 8;
-    let d1: i32 = up_down_ramp(d, strength as i32);
-    let d2: i32 = clipd1((*A as i32 - *D as i32) / 4, d1 / 2);
 
-    let B1: i32 = (*B as i32 + d1).clamp(0, 255);
-    let C1: i32 = (*C as i32 - d1).clamp(0, 255);
-    let A1: i32 = *A as i32 - d2;
-    let D1: i32 = *D as i32 + d2;
+    let a16 = *A as i16;
+    let b16 = *B as i16;
+    let c16 = *C as i16;
+    let d16 = *D as i16;
 
-    *A = A1 as u8;
-    *B = B1 as u8;
-    *C = C1 as u8;
-    *D = D1 as u8;
+    let d: i16 = (a16 - 4 *b16 + 4 * c16 - d16) / 8;
+    let d1: i16 = up_down_ramp(d, strength as i16);
+    let d2: i16 = clipd1((a16 - d16) / 4, d1 / 2);
+
+    *A = (a16 - d2) as u8;
+    *B = (b16 + d1).clamp(0, 255) as u8;
+    *C = (c16 - d1).clamp(0, 255) as u8;
+    *D = (d16 + d2) as u8;
 }
 
 /// Applies the deblocking filter to the horizontal and vertical block edges
