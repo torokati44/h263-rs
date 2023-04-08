@@ -41,35 +41,28 @@ fn process(A: &mut u8, B: &mut u8, C: &mut u8, D: &mut u8, strength: u8) {
     *D = (d16 + d2) as u8;
 }
 
-/// Applies the deblocking filter to the horizontal and vertical block edges
-/// of the given image data with the given strength, assuming 8x8 block size.
-#[allow(non_snake_case)]
-#[allow(clippy::identity_op)]
-pub fn deblock(data: &[u8], width: usize, strength: u8) -> Vec<u8> {
-    debug_assert!(data.len() % width == 0);
-    let height = data.len() / width;
-
-    let mut result = data.to_vec();
-
-    // horizontal edges
+#[inline(never)]
+fn deblock_horiz(result: &mut [u8], width: usize, height: usize, strength: u8) {
     let mut edge_y = 8; // the index of the C sample
     while edge_y <= height - 2 {
         let (_, rest) = result.split_at_mut((edge_y - 2) * width);
-        let (row_A, rest) = rest.split_at_mut(width);
-        let (row_B, rest) = rest.split_at_mut(width);
-        let (row_C, rest) = rest.split_at_mut(width);
-        let (row_D, _) = rest.split_at_mut(width);
+        let (row_a, rest) = rest.split_at_mut(width);
+        let (row_b, rest) = rest.split_at_mut(width);
+        let (row_c, rest) = rest.split_at_mut(width);
+        let (row_d, _) = rest.split_at_mut(width);
 
-        for (((A, B), C), D) in row_A.iter_mut().zip(row_B).zip(row_C).zip(row_D) {
+        for (((A, B), C), D) in row_a.iter_mut().zip(row_b).zip(row_c).zip(row_d) {
             process(A, B, C, D, strength);
         }
 
         edge_y += 8;
     }
+}
 
+#[inline(never)]
+fn deblock_vert(result: &mut [u8], width: usize, strength: u8) {
     // so the [6..] below doesn't panic, also not enough pixels to process any vertical edges otherwise
     if width >= 10 {
-        // vertical edges
         for row in result.chunks_exact_mut(width) {
             for line in row[6..].chunks_exact_mut(4).step_by(2) {
                 let (a, line) = line.split_first_mut().unwrap();
@@ -80,6 +73,22 @@ pub fn deblock(data: &[u8], width: usize, strength: u8) -> Vec<u8> {
             }
         }
     }
+}
+
+/// Applies the deblocking filter to the horizontal and vertical block edges
+/// of the given image data with the given strength, assuming 8x8 block size.
+#[allow(non_snake_case)]
+#[allow(clippy::identity_op)]
+pub fn deblock(data: &[u8], width: usize, strength: u8) -> Vec<u8> {
+    debug_assert!(data.len() % width == 0);
+    let height = data.len() / width;
+
+    let mut result = data.to_vec();
+
+    deblock_horiz(result.as_mut(), width, height, strength);
+
+    deblock_vert(result.as_mut(), width, strength);
+
 
     result
 }
