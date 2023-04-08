@@ -26,13 +26,12 @@ fn clipd1(x: i16, lim: i16) -> i16 {
 #[allow(non_snake_case)]
 #[inline]
 fn process(A: &mut u8, B: &mut u8, C: &mut u8, D: &mut u8, strength: u8) {
-
     let a16 = *A as i16;
     let b16 = *B as i16;
     let c16 = *C as i16;
     let d16 = *D as i16;
 
-    let d: i16 = (a16 - 4 *b16 + 4 * c16 - d16) / 8;
+    let d: i16 = (a16 - 4 * b16 + 4 * c16 - d16) / 8;
     let d1: i16 = up_down_ramp(d, strength as i16);
     let d2: i16 = clipd1((a16 - d16) / 4, d1 / 2);
 
@@ -55,7 +54,6 @@ pub fn deblock(data: &[u8], width: usize, strength: u8) -> Vec<u8> {
     // horizontal edges
     let mut edge_y = 8; // the index of the C sample
     while edge_y <= height - 2 {
-
         let (_, rest) = result.split_at_mut((edge_y - 2) * width);
         let (row_A, rest) = rest.split_at_mut(width);
         let (row_B, rest) = rest.split_at_mut(width);
@@ -69,29 +67,18 @@ pub fn deblock(data: &[u8], width: usize, strength: u8) -> Vec<u8> {
         edge_y += 8;
     }
 
-    // vertical edges
-    let mut edge_x = 8; // the index of the C sample
-    while edge_x <= width - 2 {
-        for y in 0..height {
-            let idx_A = y * width + edge_x - 2;
-            let idx_B = y * width + edge_x - 1;
-            let idx_C = y * width + edge_x + 0;
-            let idx_D = y * width + edge_x + 1;
-
-            let mut A = result[idx_A];
-            let mut B = result[idx_B];
-            let mut C = result[idx_C];
-            let mut D = result[idx_D];
-
-            process(&mut A, &mut B, &mut C, &mut D, strength);
-
-            result[idx_A] = A;
-            result[idx_B] = B;
-            result[idx_C] = C;
-            result[idx_D] = D;
+    // so the [6..] below doesn't panic, also not enough pixels to process any vertical edges otherwise
+    if width >= 10 {
+        // vertical edges
+        for row in result.chunks_exact_mut(width) {
+            for line in row[6..].chunks_exact_mut(4).step_by(2) {
+                let (a, line) = line.split_first_mut().unwrap();
+                let (b, line) = line.split_first_mut().unwrap();
+                let (c, line) = line.split_first_mut().unwrap();
+                let (d, _) = line.split_first_mut().unwrap();
+                process(a, b, c, d, strength)
+            }
         }
-
-        edge_x += 8;
     }
 
     result
