@@ -167,11 +167,18 @@ fn deblock_vert(result: &mut [u8], width: usize, strength: u8) {
     if width >= 10 {
         for row in result.chunks_exact_mut(width) {
             for line in row[6..].chunks_exact_mut(4).step_by(2) {
-                let (a, line) = line.split_first_mut().unwrap();
-                let (b, line) = line.split_first_mut().unwrap();
-                let (c, line) = line.split_first_mut().unwrap();
-                let (d, _) = line.split_first_mut().unwrap();
-                process(a, b, c, d, strength)
+                let mut a = line[0];
+                let mut b = line[1];
+                let mut c = line[2];
+                let mut d = line[3];
+
+                process(&mut a, &mut b, &mut c, &mut d, strength);
+
+                line[0] = a;
+                line[1] = b;
+                line[2] = c;
+                line[3] = d;
+
             }
         }
     }
@@ -187,9 +194,9 @@ pub fn deblock(data: &[u8], width: usize, strength: u8) -> Vec<u8> {
 
     let mut result = data.to_vec();
 
-    deblock_horiz(result.as_mut(), width, height, strength);
+    //deblock_horiz(result.as_mut(), width, height, strength);
 
-    //deblock_vert(result.as_mut(), width, strength);
+    deblock_vert(result.as_mut(), width, strength);
 
     result
 }
