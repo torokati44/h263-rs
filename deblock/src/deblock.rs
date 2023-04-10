@@ -189,8 +189,7 @@ pub fn deblock(data: &[u8], width: usize, strength: u8) -> Vec<u8> {
 
     deblock_horiz(result.as_mut(), width, height, strength);
 
-    deblock_vert(result.as_mut(), width, strength);
-
+    //deblock_vert(result.as_mut(), width, strength);
 
     result
 }
