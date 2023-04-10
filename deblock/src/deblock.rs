@@ -23,7 +23,7 @@ fn up_down_ramp(x: i16, strength: i16) -> i16 {
 fn signum_simd(x: i16x8) -> i16x8 {
     // NOTE: the "true" value of these comparisons is all 1 bits, which
     // is numerically -1, hence the reversed usage ot lt and gt.
-    return (x.cmp_lt(i16x8::ZERO)) - (x.cmp_gt(i16x8::ZERO));
+    x.cmp_lt(i16x8::ZERO) - x.cmp_gt(i16x8::ZERO)
 }
 
 #[inline]
