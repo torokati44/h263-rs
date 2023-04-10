@@ -9,8 +9,8 @@ pub const QUANT_TO_STRENGTH: [u8; 32] = [
 
 use std::ops::Shr;
 
+use itertools::izip;
 use wide::i16x8;
-use wide::u8x16;
 use wide::CmpGt;
 use wide::CmpLt;
 
@@ -165,13 +165,29 @@ fn deblock_horiz(result: &mut [u8], width: usize, height: usize, strength: u8) {
 fn deblock_vert(result: &mut [u8], width: usize, strength: u8) {
     // so the [6..] below doesn't panic, also not enough pixels to process any vertical edges otherwise
     if width >= 10 {
-        for row in result.chunks_exact_mut(width) {
-            for line in row[6..].chunks_exact_mut(4).step_by(2) {
-                let (a, line) = line.split_first_mut().unwrap();
-                let (b, line) = line.split_first_mut().unwrap();
-                let (c, line) = line.split_first_mut().unwrap();
-                let (d, _) = line.split_first_mut().unwrap();
-                process(a, b, c, d, strength)
+        for row in result.chunks_exact_mut(width * 8) {
+            let (row_0, row) = row.split_at_mut(width);
+            let (row_1, row) = row.split_at_mut(width);
+            let (row_2, row) = row.split_at_mut(width);
+            let (row_3, row) = row.split_at_mut(width);
+            let (row_4, row) = row.split_at_mut(width);
+            let (row_5, row) = row.split_at_mut(width);
+            let (row_6, row) = row.split_at_mut(width);
+            let (row_7, _) = row.split_at_mut(width);
+
+            let i8 = izip!(
+                row_0[6..].chunks_exact_mut(8),
+                row_1[6..].chunks_exact_mut(8),
+                row_2[6..].chunks_exact_mut(8),
+                row_3[6..].chunks_exact_mut(8),
+                row_4[6..].chunks_exact_mut(8),
+                row_5[6..].chunks_exact_mut(8),
+                row_6[6..].chunks_exact_mut(8),
+                row_7[6..].chunks_exact_mut(8)
+            );
+
+            for aa in i8 {
+                process_simd(aa.0, aa.1, aa.2, aa.3, strength);
             }
         }
     }
@@ -189,7 +205,7 @@ pub fn deblock(data: &[u8], width: usize, strength: u8) -> Vec<u8> {
 
     deblock_horiz(result.as_mut(), width, height, strength);
 
-    //deblock_vert(result.as_mut(), width, strength);
+    deblock_vert(result.as_mut(), width, strength);
 
     result
 }
