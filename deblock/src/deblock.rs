@@ -303,7 +303,7 @@ fn deblock_vert(result: &mut [u8], width: usize, strength: u8) {
 #[allow(non_snake_case)]
 #[allow(clippy::identity_op)]
 pub fn deblock(data: &[u8], width: usize, strength: u8) -> Vec<u8> {
-    debug_assert!(data.len() % width == 0);
+    debug_assert!(data.len().is_multiple_of(width));
 
     let mut result = data.to_vec();
 
